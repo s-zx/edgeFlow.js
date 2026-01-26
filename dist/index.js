@@ -70,7 +70,9 @@ Tokenizer, createBasicTokenizer, loadTokenizer,
 // Preprocessor
 ImagePreprocessor, AudioPreprocessor, preprocessText, createImagePreprocessor, createAudioPreprocessor, 
 // Cache
-Cache, InferenceCache, ModelDownloadCache, createCache, } from './utils/index.js';
+Cache, InferenceCache, ModelDownloadCache, createCache, 
+// Model Loader (Preloading, Sharding, Resume, Caching)
+loadModelData, preloadModel, preloadModels, isModelCached, getCachedModel, deleteCachedModel, clearModelCache, getModelCacheStats, getPreloadStatus, cancelPreload, getPreloadedModel, } from './utils/index.js';
 // ============================================================================
 // Tools Exports
 // ============================================================================

@@ -338,38 +338,38 @@ export class LoadedModelImpl implements LoadedModel {
 // ============================================================================
 
 /**
- * Load model from URL
+ * Load model from URL with advanced loading support
+ * (caching, sharding, resume download)
  */
 export async function loadModel(
   url: string,
-  options: ModelLoadOptions & { runtime?: RuntimeType } = {}
+  options: ModelLoadOptions & { 
+    runtime?: RuntimeType;
+    cache?: boolean;
+    resumable?: boolean;
+    chunkSize?: number;
+    forceDownload?: boolean;
+  } = {}
 ): Promise<LoadedModel> {
   const manager = RuntimeManager.getInstance();
   const runtime = await manager.getRuntime(options.runtime ?? 'auto');
 
-  // Fetch model data
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new EdgeFlowError(
-      `Failed to fetch model from ${url}: ${response.status} ${response.statusText}`,
-      ErrorCodes.MODEL_NOT_FOUND,
-      { url, status: response.status }
-    );
-  }
+  // Import model loader dynamically to avoid circular dependencies
+  const { loadModelData } = await import('../utils/model-loader.js');
 
-  const modelData = await response.arrayBuffer();
-
-  // Track progress
-  if (options.onProgress) {
-    options.onProgress(0.5);
-  }
+  // Use advanced model loader with caching and resume support
+  const modelData = await loadModelData(url, {
+    cache: options.cache ?? true,
+    resumable: options.resumable ?? true,
+    chunkSize: options.chunkSize,
+    forceDownload: options.forceDownload,
+    onProgress: options.onProgress ? (progress) => {
+      options.onProgress!(progress.percent / 100);
+    } : undefined,
+  });
 
   // Load into runtime
   const model = await runtime.loadModel(modelData, options);
-
-  if (options.onProgress) {
-    options.onProgress(1.0);
-  }
 
   return model;
 }

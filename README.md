@@ -246,10 +246,13 @@ const model = await pipeline('text-classification', {
 ```typescript
 import { loadModel, runInference } from 'edgeflow';
 
-// Load from URL
+// Load from URL with caching, sharding, and resume support
 const model = await loadModel('https://example.com/model.bin', {
   runtime: 'webgpu',
   quantization: 'int8',
+  cache: true,           // Enable IndexedDB caching (default: true)
+  resumable: true,       // Enable resume download (default: true)
+  chunkSize: 5 * 1024 * 1024, // 5MB chunks for large models
   onProgress: (progress) => console.log(`Loading: ${progress * 100}%`)
 });
 
@@ -258,6 +261,76 @@ const outputs = await runInference(model, inputs);
 
 // Cleanup
 model.dispose();
+```
+
+### Preloading Models
+
+```typescript
+import { preloadModel, preloadModels, getPreloadStatus } from 'edgeflow';
+
+// Preload a single model in background (with priority)
+preloadModel('https://example.com/model1.onnx', { priority: 10 });
+
+// Preload multiple models
+preloadModels([
+  { url: 'https://example.com/model1.onnx', priority: 10 },
+  { url: 'https://example.com/model2.onnx', priority: 5 },
+]);
+
+// Check preload status
+const status = getPreloadStatus('https://example.com/model1.onnx');
+// 'pending' | 'loading' | 'complete' | 'error' | 'not_found'
+```
+
+### Model Caching
+
+```typescript
+import { 
+  isModelCached, 
+  getCachedModel, 
+  deleteCachedModel, 
+  clearModelCache,
+  getModelCacheStats 
+} from 'edgeflow';
+
+// Check if model is cached
+if (await isModelCached('https://example.com/model.onnx')) {
+  console.log('Model is cached!');
+}
+
+// Get cached model data directly
+const modelData = await getCachedModel('https://example.com/model.onnx');
+
+// Delete a specific cached model
+await deleteCachedModel('https://example.com/model.onnx');
+
+// Clear all cached models
+await clearModelCache();
+
+// Get cache statistics
+const stats = await getModelCacheStats();
+console.log(`${stats.models} models cached, ${stats.totalSize} bytes total`);
+```
+
+### Resume Downloads
+
+Large model downloads automatically support resuming from where they left off:
+
+```typescript
+import { loadModelData } from 'edgeflow';
+
+// Download with progress and resume support
+const modelData = await loadModelData('https://example.com/large-model.onnx', {
+  resumable: true,
+  chunkSize: 10 * 1024 * 1024, // 10MB chunks
+  parallelConnections: 4,      // Download 4 chunks in parallel
+  onProgress: (progress) => {
+    console.log(`${progress.percent.toFixed(1)}% downloaded`);
+    console.log(`Speed: ${(progress.speed / 1024 / 1024).toFixed(2)} MB/s`);
+    console.log(`ETA: ${(progress.eta / 1000).toFixed(0)}s`);
+    console.log(`Chunk ${progress.currentChunk}/${progress.totalChunks}`);
+  }
+});
 ```
 
 ### Model Quantization

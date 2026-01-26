@@ -33,3 +33,21 @@ export {
   type CacheOptions,
   type CacheStats,
 } from './cache.js';
+
+// Model Loader (Preloading, Sharding, Resume, Caching)
+export {
+  loadModelData,
+  preloadModel,
+  preloadModels,
+  isModelCached,
+  getCachedModel,
+  deleteCachedModel,
+  clearModelCache,
+  getModelCacheStats,
+  getPreloadStatus,
+  cancelPreload,
+  getPreloadedModel,
+  type DownloadProgress,
+  type ModelLoaderOptions,
+  type PreloadOptions,
+} from './model-loader.js';

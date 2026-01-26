@@ -86,10 +86,15 @@ export declare class LoadedModelImpl implements LoadedModel {
     dispose(): void;
 }
 /**
- * Load model from URL
+ * Load model from URL with advanced loading support
+ * (caching, sharding, resume download)
  */
 export declare function loadModel(url: string, options?: ModelLoadOptions & {
     runtime?: RuntimeType;
+    cache?: boolean;
+    resumable?: boolean;
+    chunkSize?: number;
+    forceDownload?: boolean;
 }): Promise<LoadedModel>;
 /**
  * Load model from ArrayBuffer

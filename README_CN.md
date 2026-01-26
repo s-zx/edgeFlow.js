@@ -246,10 +246,13 @@ const model = await pipeline('text-classification', {
 ```typescript
 import { loadModel, runInference } from 'edgeflow';
 
-// 从 URL 加载
+// 从 URL 加载，支持缓存、分片和断点续传
 const model = await loadModel('https://example.com/model.bin', {
   runtime: 'webgpu',
   quantization: 'int8',
+  cache: true,           // 启用 IndexedDB 缓存（默认: true）
+  resumable: true,       // 启用断点续传（默认: true）
+  chunkSize: 5 * 1024 * 1024, // 大模型使用 5MB 分片
   onProgress: (progress) => console.log(`加载中: ${progress * 100}%`)
 });
 
@@ -258,6 +261,76 @@ const outputs = await runInference(model, inputs);
 
 // 清理
 model.dispose();
+```
+
+### 模型预加载
+
+```typescript
+import { preloadModel, preloadModels, getPreloadStatus } from 'edgeflow';
+
+// 后台预加载单个模型（支持优先级）
+preloadModel('https://example.com/model1.onnx', { priority: 10 });
+
+// 预加载多个模型
+preloadModels([
+  { url: 'https://example.com/model1.onnx', priority: 10 },
+  { url: 'https://example.com/model2.onnx', priority: 5 },
+]);
+
+// 检查预加载状态
+const status = getPreloadStatus('https://example.com/model1.onnx');
+// 'pending' | 'loading' | 'complete' | 'error' | 'not_found'
+```
+
+### 模型缓存
+
+```typescript
+import { 
+  isModelCached, 
+  getCachedModel, 
+  deleteCachedModel, 
+  clearModelCache,
+  getModelCacheStats 
+} from 'edgeflow';
+
+// 检查模型是否已缓存
+if (await isModelCached('https://example.com/model.onnx')) {
+  console.log('模型已缓存！');
+}
+
+// 直接获取缓存的模型数据
+const modelData = await getCachedModel('https://example.com/model.onnx');
+
+// 删除特定缓存的模型
+await deleteCachedModel('https://example.com/model.onnx');
+
+// 清空所有缓存的模型
+await clearModelCache();
+
+// 获取缓存统计
+const stats = await getModelCacheStats();
+console.log(`${stats.models} 个模型已缓存，共 ${stats.totalSize} 字节`);
+```
+
+### 断点续传下载
+
+大模型下载自动支持从断点处继续：
+
+```typescript
+import { loadModelData } from 'edgeflow';
+
+// 带进度和断点续传的下载
+const modelData = await loadModelData('https://example.com/large-model.onnx', {
+  resumable: true,
+  chunkSize: 10 * 1024 * 1024, // 10MB 分片
+  parallelConnections: 4,      // 并行下载 4 个分片
+  onProgress: (progress) => {
+    console.log(`${progress.percent.toFixed(1)}% 已下载`);
+    console.log(`速度: ${(progress.speed / 1024 / 1024).toFixed(2)} MB/s`);
+    console.log(`预计剩余: ${(progress.eta / 1000).toFixed(0)}秒`);
+    console.log(`分片 ${progress.currentChunk}/${progress.totalChunks}`);
+  }
+});
 ```
 
 ### 模型量化

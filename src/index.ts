@@ -242,6 +242,22 @@ export {
   type CacheStrategy,
   type CacheOptions,
   type CacheStats,
+  
+  // Model Loader (Preloading, Sharding, Resume, Caching)
+  loadModelData,
+  preloadModel,
+  preloadModels,
+  isModelCached,
+  getCachedModel,
+  deleteCachedModel,
+  clearModelCache,
+  getModelCacheStats,
+  getPreloadStatus,
+  cancelPreload,
+  getPreloadedModel,
+  type DownloadProgress,
+  type ModelLoaderOptions,
+  type PreloadOptions,
 } from './utils/index.js';
 
 // ============================================================================
