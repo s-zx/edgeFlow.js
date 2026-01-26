@@ -2,13 +2,13 @@
 
 <div align="center">
 
-**Lightweight, high-performance browser ML inference framework with native concurrency support.**
+**Lightweight, high-performance browser ML inference framework.**
 
 [![npm version](https://img.shields.io/npm/v/edgeflow.svg)](https://www.npmjs.com/package/edgeflow)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/edgeflow)](https://bundlephobia.com/package/edgeflow)
 [![license](https://img.shields.io/npm/l/edgeflow)](LICENSE)
 
-[Documentation](https://edgeflow.js.org) · [Examples](examples/) · [API Reference](https://edgeflow.js.org/api)
+[Documentation](https://edgeflow.js.org) · [Examples](examples/) · [API Reference](https://edgeflow.js.org/api) · [English](README.md) | [中文](README_CN.md)
 
 </div>
 
