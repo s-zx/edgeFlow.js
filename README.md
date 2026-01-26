@@ -17,12 +17,14 @@
 ## ✨ Features
 
 - 🚀 **Native Concurrency** - Run multiple models in parallel, no more serial execution bottleneck
-- ⚡ **High Performance** - WebGPU-first with automatic fallback to WebNN/WASM
 - 📦 **Lightweight** - Core bundle < 500KB, zero runtime dependencies
 - 🔄 **Native Batch Processing** - Efficient batch inference out of the box
 - 💾 **Smart Memory Management** - Automatic memory tracking and cleanup
 - 🎯 **Developer Friendly** - Full TypeScript support with intuitive APIs
 - 🔌 **Modular Architecture** - Import only what you need
+- 📥 **Advanced Model Loading** - Preloading, sharding, resume download support
+- 💿 **Intelligent Caching** - IndexedDB-based model caching for offline use
+- ⚡ **High Performance** - WebGPU-first with automatic fallback to WebNN/WASM
 
 ## 📦 Installation
 
