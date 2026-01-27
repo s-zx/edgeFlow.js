@@ -66,13 +66,15 @@ createTextClassificationPipeline, createSentimentAnalysisPipeline, createFeature
 // ============================================================================
 export { 
 // Tokenizer
-Tokenizer, createBasicTokenizer, loadTokenizer, 
+Tokenizer, createBasicTokenizer, loadTokenizer, loadTokenizerFromHub, 
 // Preprocessor
 ImagePreprocessor, AudioPreprocessor, preprocessText, createImagePreprocessor, createAudioPreprocessor, 
 // Cache
 Cache, InferenceCache, ModelDownloadCache, createCache, 
 // Model Loader (Preloading, Sharding, Resume, Caching)
-loadModelData, preloadModel, preloadModels, isModelCached, getCachedModel, deleteCachedModel, clearModelCache, getModelCacheStats, getPreloadStatus, cancelPreload, getPreloadedModel, } from './utils/index.js';
+loadModelData, preloadModel, preloadModels, isModelCached, getCachedModel, deleteCachedModel, clearModelCache, getModelCacheStats, getPreloadStatus, cancelPreload, getPreloadedModel, 
+// HuggingFace Hub Integration
+fromHub, fromTask, downloadModel, downloadTokenizer, downloadConfig, modelExists, getModelInfo, getDefaultModel, POPULAR_MODELS, } from './utils/index.js';
 // ============================================================================
 // Tools Exports
 // ============================================================================

@@ -221,6 +221,7 @@ export {
   Tokenizer,
   createBasicTokenizer,
   loadTokenizer,
+  loadTokenizerFromHub,
   type TokenizerModel,
   type TokenizerOptions,
   
@@ -258,6 +259,22 @@ export {
   type DownloadProgress,
   type ModelLoaderOptions,
   type PreloadOptions,
+  
+  // HuggingFace Hub Integration
+  fromHub,
+  fromTask,
+  downloadModel,
+  downloadTokenizer,
+  downloadConfig,
+  modelExists,
+  getModelInfo,
+  getDefaultModel,
+  POPULAR_MODELS,
+  type HubOptions,
+  type HubDownloadProgress,
+  type ModelConfig,
+  type ModelBundle,
+  type PopularModelTask,
 } from './utils/index.js';
 
 // ============================================================================

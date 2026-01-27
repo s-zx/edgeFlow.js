@@ -66,3 +66,20 @@ export {
   getBestRuntime,
   getAvailableRuntimes,
 } from './runtime.js';
+
+// Worker
+export {
+  InferenceWorker,
+  WorkerPool,
+  getWorkerPool,
+  runInWorker,
+  isWorkerSupported,
+  serializeTensor,
+  deserializeTensor,
+  type WorkerMessage,
+  type WorkerMessageType,
+  type LoadModelRequest,
+  type InferenceRequest,
+  type SerializedTensor,
+  type WorkerPoolOptions,
+} from './worker.js';

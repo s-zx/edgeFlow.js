@@ -7,6 +7,7 @@ export {
   Tokenizer,
   createBasicTokenizer,
   loadTokenizer,
+  loadTokenizerFromHub,
   type TokenizerModel,
   type TokenizerOptions,
 } from './tokenizer.js';
@@ -51,3 +52,22 @@ export {
   type ModelLoaderOptions,
   type PreloadOptions,
 } from './model-loader.js';
+
+// HuggingFace Hub Integration
+export {
+  fromHub,
+  fromTask,
+  downloadModel,
+  downloadFile,
+  downloadTokenizer,
+  downloadConfig,
+  modelExists,
+  getModelInfo,
+  getDefaultModel,
+  POPULAR_MODELS,
+  type HubOptions,
+  type HubDownloadProgress,
+  type ModelConfig,
+  type ModelBundle,
+  type PopularModelTask,
+} from './hub.js';

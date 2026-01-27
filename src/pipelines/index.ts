@@ -48,6 +48,52 @@ export {
   type ImageInput,
 } from './image-classification.js';
 
+// Text Generation
+export {
+  TextGenerationPipeline,
+  createTextGenerationPipeline,
+  type TextGenerationOptions,
+  type TextGenerationResult,
+  type GenerationStreamEvent,
+} from './text-generation.js';
+
+// Object Detection
+export {
+  ObjectDetectionPipeline,
+  createObjectDetectionPipeline,
+  COCO_LABELS,
+  type ObjectDetectionOptions,
+  type Detection,
+  type BoundingBox,
+} from './object-detection.js';
+
+// Automatic Speech Recognition
+export {
+  AutomaticSpeechRecognitionPipeline,
+  createASRPipeline,
+  type ASROptions,
+  type ASRResult,
+  type WordTimestamp,
+  type ChunkTimestamp,
+} from './automatic-speech-recognition.js';
+
+// Zero-shot Classification
+export {
+  ZeroShotClassificationPipeline,
+  createZeroShotClassificationPipeline,
+  type ZeroShotClassificationOptions,
+  type ZeroShotClassificationResult,
+} from './zero-shot-classification.js';
+
+// Question Answering
+export {
+  QuestionAnsweringPipeline,
+  createQuestionAnsweringPipeline,
+  type QuestionAnsweringOptions,
+  type QuestionAnsweringResult,
+  type QAInput,
+} from './question-answering.js';
+
 // ============================================================================
 // High-Level Pipeline Factory
 // ============================================================================
@@ -76,12 +122,22 @@ type PipelineTaskMap = {
   'sentiment-analysis': SentimentAnalysisPipeline;
   'feature-extraction': FeatureExtractionPipeline;
   'image-classification': ImageClassificationPipeline;
+  'text-generation': TextGenerationPipeline;
+  'object-detection': ObjectDetectionPipeline;
+  'automatic-speech-recognition': AutomaticSpeechRecognitionPipeline;
+  'zero-shot-classification': ZeroShotClassificationPipeline;
+  'question-answering': QuestionAnsweringPipeline;
 };
 
 // Import pipeline classes
 import { TextClassificationPipeline, SentimentAnalysisPipeline } from './text-classification.js';
 import { FeatureExtractionPipeline } from './feature-extraction.js';
 import { ImageClassificationPipeline } from './image-classification.js';
+import { TextGenerationPipeline } from './text-generation.js';
+import { ObjectDetectionPipeline } from './object-detection.js';
+import { AutomaticSpeechRecognitionPipeline } from './automatic-speech-recognition.js';
+import { ZeroShotClassificationPipeline } from './zero-shot-classification.js';
+import { QuestionAnsweringPipeline } from './question-answering.js';
 
 /**
  * Create a pipeline for a specific task
@@ -110,7 +166,9 @@ export async function pipeline<T extends keyof PipelineTaskMap>(
     quantization: options?.quantization,
   };
 
-  let pipelineInstance: TextClassificationPipeline | SentimentAnalysisPipeline | FeatureExtractionPipeline | ImageClassificationPipeline;
+  type AllPipelines = TextClassificationPipeline | SentimentAnalysisPipeline | FeatureExtractionPipeline | ImageClassificationPipeline | TextGenerationPipeline | ObjectDetectionPipeline | AutomaticSpeechRecognitionPipeline | ZeroShotClassificationPipeline | QuestionAnsweringPipeline;
+  
+  let pipelineInstance: AllPipelines;
 
   switch (task) {
     case 'text-classification':
@@ -124,6 +182,21 @@ export async function pipeline<T extends keyof PipelineTaskMap>(
       break;
     case 'image-classification':
       pipelineInstance = new ImageClassificationPipeline(config, options?.labels);
+      break;
+    case 'text-generation':
+      pipelineInstance = new TextGenerationPipeline(config);
+      break;
+    case 'object-detection':
+      pipelineInstance = new ObjectDetectionPipeline(config, options?.labels);
+      break;
+    case 'automatic-speech-recognition':
+      pipelineInstance = new AutomaticSpeechRecognitionPipeline(config);
+      break;
+    case 'zero-shot-classification':
+      pipelineInstance = new ZeroShotClassificationPipeline(config);
+      break;
+    case 'question-answering':
+      pipelineInstance = new QuestionAnsweringPipeline(config);
       break;
     default:
       throw new Error(`Unknown pipeline task: ${task}`);

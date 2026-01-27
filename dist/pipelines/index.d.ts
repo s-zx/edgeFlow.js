@@ -6,6 +6,11 @@ export { BasePipeline, registerPipeline, getPipelineFactory, SENTIMENT_LABELS, E
 export { TextClassificationPipeline, SentimentAnalysisPipeline, createTextClassificationPipeline, createSentimentAnalysisPipeline, type TextClassificationOptions, } from './text-classification.js';
 export { FeatureExtractionPipeline, createFeatureExtractionPipeline, type FeatureExtractionOptions, } from './feature-extraction.js';
 export { ImageClassificationPipeline, createImageClassificationPipeline, type ImageClassificationOptions, type ImageInput, } from './image-classification.js';
+export { TextGenerationPipeline, createTextGenerationPipeline, type TextGenerationOptions, type TextGenerationResult, type GenerationStreamEvent, } from './text-generation.js';
+export { ObjectDetectionPipeline, createObjectDetectionPipeline, COCO_LABELS, type ObjectDetectionOptions, type Detection, type BoundingBox, } from './object-detection.js';
+export { AutomaticSpeechRecognitionPipeline, createASRPipeline, type ASROptions, type ASRResult, type WordTimestamp, type ChunkTimestamp, } from './automatic-speech-recognition.js';
+export { ZeroShotClassificationPipeline, createZeroShotClassificationPipeline, type ZeroShotClassificationOptions, type ZeroShotClassificationResult, } from './zero-shot-classification.js';
+export { QuestionAnsweringPipeline, createQuestionAnsweringPipeline, type QuestionAnsweringOptions, type QuestionAnsweringResult, type QAInput, } from './question-answering.js';
 /**
  * Pipeline options for the factory function
  */
@@ -29,10 +34,20 @@ type PipelineTaskMap = {
     'sentiment-analysis': SentimentAnalysisPipeline;
     'feature-extraction': FeatureExtractionPipeline;
     'image-classification': ImageClassificationPipeline;
+    'text-generation': TextGenerationPipeline;
+    'object-detection': ObjectDetectionPipeline;
+    'automatic-speech-recognition': AutomaticSpeechRecognitionPipeline;
+    'zero-shot-classification': ZeroShotClassificationPipeline;
+    'question-answering': QuestionAnsweringPipeline;
 };
 import { TextClassificationPipeline, SentimentAnalysisPipeline } from './text-classification.js';
 import { FeatureExtractionPipeline } from './feature-extraction.js';
 import { ImageClassificationPipeline } from './image-classification.js';
+import { TextGenerationPipeline } from './text-generation.js';
+import { ObjectDetectionPipeline } from './object-detection.js';
+import { AutomaticSpeechRecognitionPipeline } from './automatic-speech-recognition.js';
+import { ZeroShotClassificationPipeline } from './zero-shot-classification.js';
+import { QuestionAnsweringPipeline } from './question-answering.js';
 /**
  * Create a pipeline for a specific task
  *

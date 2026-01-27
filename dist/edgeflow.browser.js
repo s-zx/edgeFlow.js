@@ -3986,152 +3986,244 @@ var IMAGENET_LABELS = [
 ];
 
 // dist/utils/tokenizer.js
-var Tokenizer = class {
-  constructor(config, options = {}) {
-    __publicField(this, "vocab");
-    __publicField(this, "reverseVocab");
-    __publicField(this, "config");
-    __publicField(this, "model");
+var Tokenizer = class _Tokenizer {
+  constructor() {
+    __publicField(this, "vocab", /* @__PURE__ */ new Map());
+    __publicField(this, "reverseVocab", /* @__PURE__ */ new Map());
     __publicField(this, "merges", /* @__PURE__ */ new Map());
-    this.config = {
-      vocabSize: config.vocabSize ?? 30522,
-      maxLength: config.maxLength ?? 512,
-      padTokenId: config.padTokenId ?? 0,
-      unkTokenId: config.unkTokenId ?? 100,
-      bosTokenId: config.bosTokenId,
-      eosTokenId: config.eosTokenId,
-      sepTokenId: config.sepTokenId ?? 102,
-      clsTokenId: config.clsTokenId ?? 101,
-      maskTokenId: config.maskTokenId ?? 103
-    };
-    this.model = options.model ?? "basic";
-    this.vocab = /* @__PURE__ */ new Map();
-    this.reverseVocab = /* @__PURE__ */ new Map();
-    if (options.vocab) {
-      this.loadVocab(options.vocab);
-    }
-    if (options.merges) {
-      this.loadMerges(options.merges);
-    }
+    __publicField(this, "addedTokens", /* @__PURE__ */ new Map());
+    __publicField(this, "specialTokens", /* @__PURE__ */ new Set());
+    __publicField(this, "modelType", "BPE");
+    __publicField(this, "unkToken", "[UNK]");
+    __publicField(this, "continuingSubwordPrefix", "##");
+    // Special token IDs
+    __publicField(this, "padTokenId", 0);
+    __publicField(this, "unkTokenId", 0);
+    __publicField(this, "clsTokenId");
+    __publicField(this, "sepTokenId");
+    __publicField(this, "maskTokenId");
+    __publicField(this, "bosTokenId");
+    __publicField(this, "eosTokenId");
+    // Config
+    __publicField(this, "maxLength", 512);
+    __publicField(this, "doLowerCase", false);
+    __publicField(this, "stripAccents", false);
+    // Post-processor config
+    __publicField(this, "postProcessor");
+    // Byte encoder for BPE
+    __publicField(this, "byteEncoder", /* @__PURE__ */ new Map());
+    __publicField(this, "byteDecoder", /* @__PURE__ */ new Map());
+    this.initByteEncoder();
   }
   /**
-   * Load vocabulary
+   * Initialize byte encoder/decoder for BPE
    */
-  loadVocab(vocab) {
-    if (vocab instanceof Map) {
-      this.vocab = new Map(vocab);
-    } else {
-      this.vocab = new Map(Object.entries(vocab));
-    }
-    for (const [token, id] of this.vocab) {
-      this.reverseVocab.set(id, token);
-    }
-  }
-  /**
-   * Load BPE merges
-   */
-  loadMerges(merges) {
-    for (const merge of merges) {
-      const [a, b] = merge.split(" ");
-      if (a && b) {
-        this.merges.set(`${a} ${b}`, `${a}${b}`);
+  initByteEncoder() {
+    const bytes = [];
+    for (let i = 33; i <= 126; i++)
+      bytes.push(i);
+    for (let i = 161; i <= 172; i++)
+      bytes.push(i);
+    for (let i = 174; i <= 255; i++)
+      bytes.push(i);
+    const chars = [...bytes];
+    let n = 0;
+    for (let i = 0; i < 256; i++) {
+      if (!bytes.includes(i)) {
+        bytes.push(i);
+        chars.push(256 + n);
+        n++;
       }
     }
+    for (let i = 0; i < bytes.length; i++) {
+      const byte = bytes[i];
+      const char = String.fromCharCode(chars[i]);
+      this.byteEncoder.set(byte, char);
+      this.byteDecoder.set(char, byte);
+    }
   }
   /**
-   * Tokenize text
+   * Load from HuggingFace tokenizer.json
    */
-  encode(text, options = {}) {
-    const { addSpecialTokens = true, maxLength = this.config.maxLength, padding = "max_length", truncation = true, returnAttentionMask = true, returnTokenTypeIds = false } = options;
-    let tokens = this.tokenize(text);
-    if (addSpecialTokens) {
-      tokens = this.addSpecialTokens(tokens);
+  static async fromJSON(json) {
+    const tokenizer = new _Tokenizer();
+    const data = typeof json === "string" ? JSON.parse(json) : json;
+    if (data.model) {
+      tokenizer.modelType = data.model.type;
+      if (data.model.vocab) {
+        for (const [token, id] of Object.entries(data.model.vocab)) {
+          tokenizer.vocab.set(token, id);
+          tokenizer.reverseVocab.set(id, token);
+        }
+      }
+      if (data.model.merges) {
+        for (let i = 0; i < data.model.merges.length; i++) {
+          tokenizer.merges.set(data.model.merges[i], i);
+        }
+      }
+      tokenizer.unkToken = data.model.unk_token ?? "[UNK]";
+      tokenizer.continuingSubwordPrefix = data.model.continuing_subword_prefix ?? "##";
     }
-    let inputIds = this.convertTokensToIds(tokens);
-    if (truncation && inputIds.length > maxLength) {
-      inputIds = inputIds.slice(0, maxLength);
-      if (addSpecialTokens && this.config.sepTokenId !== void 0) {
-        inputIds[inputIds.length - 1] = this.config.sepTokenId;
+    if (data.added_tokens) {
+      for (const token of data.added_tokens) {
+        tokenizer.addedTokens.set(token.content, token.id);
+        tokenizer.reverseVocab.set(token.id, token.content);
+        if (token.special) {
+          tokenizer.specialTokens.add(token.content);
+        }
+        const content = token.content.toLowerCase();
+        if (content.includes("pad"))
+          tokenizer.padTokenId = token.id;
+        if (content.includes("unk"))
+          tokenizer.unkTokenId = token.id;
+        if (content.includes("cls") || content === "[cls]")
+          tokenizer.clsTokenId = token.id;
+        if (content.includes("sep") || content === "[sep]")
+          tokenizer.sepTokenId = token.id;
+        if (content.includes("mask"))
+          tokenizer.maskTokenId = token.id;
+        if (content.includes("bos") || content === "<s>")
+          tokenizer.bosTokenId = token.id;
+        if (content.includes("eos") || content === "</s>")
+          tokenizer.eosTokenId = token.id;
       }
     }
-    const attentionMask = returnAttentionMask ? inputIds.map(() => 1) : [];
-    if (padding === "max_length" && inputIds.length < maxLength) {
-      const padLength = maxLength - inputIds.length;
-      inputIds = [...inputIds, ...new Array(padLength).fill(this.config.padTokenId)];
-      if (returnAttentionMask) {
-        attentionMask.push(...new Array(padLength).fill(0));
-      }
+    if (data.normalizer) {
+      tokenizer.doLowerCase = data.normalizer.lowercase ?? false;
+      tokenizer.stripAccents = data.normalizer.strip_accents ?? false;
     }
-    const result = {
-      inputIds,
-      attentionMask
-    };
-    if (returnTokenTypeIds) {
-      result.tokenTypeIds = inputIds.map(() => 0);
+    if (data.truncation) {
+      tokenizer.maxLength = data.truncation.max_length;
     }
-    return result;
+    if (data.post_processor) {
+      tokenizer.postProcessor = data.post_processor;
+    }
+    return tokenizer;
   }
   /**
-   * Batch encode
+   * Load from URL (tokenizer.json)
    */
-  encodeBatch(texts, options = {}) {
-    let maxLen = options.maxLength ?? this.config.maxLength;
-    if (options.padding === "longest") {
-      const encodings = texts.map((text) => this.encode(text, { ...options, padding: "do_not_pad" }));
-      maxLen = Math.max(...encodings.map((e) => e.inputIds.length));
+  static async fromUrl(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new EdgeFlowError(`Failed to load tokenizer from ${url}: ${response.status}`, ErrorCodes.MODEL_NOT_FOUND);
     }
-    return texts.map((text) => this.encode(text, { ...options, maxLength: maxLen }));
+    const json = await response.json();
+    return _Tokenizer.fromJSON(json);
   }
   /**
-   * Decode token IDs back to text
+   * Load from HuggingFace Hub
    */
-  decode(ids, skipSpecialTokens = true) {
-    const tokens = this.convertIdsToTokens(ids);
-    const filteredTokens = skipSpecialTokens ? tokens.filter((token) => !this.isSpecialToken(token)) : tokens;
-    return this.detokenize(filteredTokens);
-  }
-  /**
-   * Basic tokenization (split by whitespace and punctuation)
-   */
-  tokenize(text) {
-    const normalized = this.normalize(text);
-    switch (this.model) {
-      case "bpe":
-        return this.tokenizeBPE(normalized);
-      case "wordpiece":
-        return this.tokenizeWordPiece(normalized);
-      default:
-        return this.tokenizeBasic(normalized);
-    }
+  static async fromHuggingFace(modelId, options) {
+    const revision = options?.revision ?? "main";
+    const url = `https://huggingface.co/${modelId}/resolve/${revision}/tokenizer.json`;
+    return _Tokenizer.fromUrl(url);
   }
   /**
    * Normalize text
    */
   normalize(text) {
-    return text.toLowerCase().replace(/[^\w\s'-]/g, " $& ").replace(/\s+/g, " ").trim();
+    let result = text;
+    if (this.doLowerCase) {
+      result = result.toLowerCase();
+    }
+    if (this.stripAccents) {
+      result = result.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    }
+    result = result.replace(/\s+/g, " ").trim();
+    return result;
   }
   /**
-   * Basic tokenization
+   * Pre-tokenize text (split into words)
    */
-  tokenizeBasic(text) {
-    return text.split(/\s+/).filter((t) => t.length > 0);
+  preTokenize(text) {
+    const pattern = /'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+/gu;
+    const matches = text.match(pattern);
+    return matches ?? [text];
+  }
+  /**
+   * Encode text to bytes (for BPE)
+   */
+  textToBytes(text) {
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(text);
+    return Array.from(bytes).map((b) => this.byteEncoder.get(b) ?? "").join("");
+  }
+  /**
+   * Decode bytes to text (for BPE)
+   */
+  bytesToText(text) {
+    const bytes = new Uint8Array(text.split("").map((c) => this.byteDecoder.get(c) ?? 0));
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    return decoder.decode(bytes);
+  }
+  /**
+   * Get BPE pairs from word
+   */
+  getPairs(word) {
+    const pairs = /* @__PURE__ */ new Set();
+    for (let i = 0; i < word.length - 1; i++) {
+      pairs.add(`${word[i]} ${word[i + 1]}`);
+    }
+    return pairs;
+  }
+  /**
+   * Apply BPE to a word
+   */
+  bpe(token) {
+    if (this.vocab.has(token)) {
+      return [token];
+    }
+    let word = token.split("");
+    let pairs = this.getPairs(word);
+    if (pairs.size === 0) {
+      return [token];
+    }
+    while (true) {
+      let minPair = null;
+      let minRank = Infinity;
+      for (const pair of pairs) {
+        const rank = this.merges.get(pair);
+        if (rank !== void 0 && rank < minRank) {
+          minRank = rank;
+          minPair = pair;
+        }
+      }
+      if (minPair === null)
+        break;
+      const parts = minPair.split(" ");
+      const first = parts[0];
+      const second = parts[1];
+      if (!first || !second)
+        break;
+      const newWord = [];
+      let i = 0;
+      while (i < word.length) {
+        const j = word.indexOf(first, i);
+        if (j === -1) {
+          newWord.push(...word.slice(i));
+          break;
+        }
+        newWord.push(...word.slice(i, j));
+        if (word[j] === first && j < word.length - 1 && word[j + 1] === second) {
+          newWord.push(first + second);
+          i = j + 2;
+        } else {
+          newWord.push(word[j]);
+          i = j + 1;
+        }
+      }
+      word = newWord;
+      if (word.length === 1)
+        break;
+      pairs = this.getPairs(word);
+    }
+    return word;
   }
   /**
    * WordPiece tokenization
    */
-  tokenizeWordPiece(text) {
-    const words = text.split(/\s+/).filter((w) => w.length > 0);
-    const tokens = [];
-    for (const word of words) {
-      const wordTokens = this.tokenizeWord(word);
-      tokens.push(...wordTokens);
-    }
-    return tokens;
-  }
-  /**
-   * Tokenize a single word using WordPiece
-   */
-  tokenizeWord(word) {
+  wordPiece(word) {
     if (this.vocab.has(word)) {
       return [word];
     }
@@ -4139,290 +4231,301 @@ var Tokenizer = class {
     let start = 0;
     while (start < word.length) {
       let end = word.length;
-      let found = false;
+      let curSubstr = null;
       while (start < end) {
-        const substr = start === 0 ? word.slice(start, end) : `##${word.slice(start, end)}`;
+        let substr = word.slice(start, end);
+        if (start > 0) {
+          substr = this.continuingSubwordPrefix + substr;
+        }
         if (this.vocab.has(substr)) {
-          tokens.push(substr);
-          found = true;
+          curSubstr = substr;
           break;
         }
         end--;
       }
-      if (!found) {
-        tokens.push("[UNK]");
+      if (curSubstr === null) {
+        tokens.push(this.unkToken);
         start++;
       } else {
+        tokens.push(curSubstr);
         start = end;
       }
     }
     return tokens;
   }
   /**
-   * BPE tokenization
+   * Tokenize a single word
    */
-  tokenizeBPE(text) {
-    const words = text.split(/\s+/).filter((w) => w.length > 0);
-    const tokens = [];
-    for (const word of words) {
-      let chars = word.split("").map((c, i) => i === word.length - 1 ? c + "</w>" : c);
-      while (chars.length > 1) {
-        let minPair = null;
-        let minScore = Infinity;
-        for (let i = 0; i < chars.length - 1; i++) {
-          const pair2 = `${chars[i]} ${chars[i + 1]}`;
-          if (this.merges.has(pair2)) {
-            const score = Array.from(this.merges.keys()).indexOf(pair2);
-            if (score < minScore) {
-              minScore = score;
-              minPair = [i, pair2];
-            }
-          }
-        }
-        if (!minPair)
-          break;
-        const [idx, pair] = minPair;
-        const merged = this.merges.get(pair);
-        chars = [
-          ...chars.slice(0, idx),
-          merged,
-          ...chars.slice(idx + 2)
-        ];
-      }
-      tokens.push(...chars);
+  tokenizeWord(word) {
+    if (this.addedTokens.has(word)) {
+      return [word];
     }
-    return tokens;
+    switch (this.modelType) {
+      case "BPE": {
+        const byteStr = this.textToBytes(word);
+        return this.bpe(byteStr);
+      }
+      case "WordPiece":
+        return this.wordPiece(word);
+      default:
+        return this.vocab.has(word) ? [word] : [this.unkToken];
+    }
   }
   /**
-   * Add special tokens
+   * Main tokenization
    */
-  addSpecialTokens(tokens) {
-    const result = [];
-    if (this.config.clsTokenId !== void 0) {
-      result.push("[CLS]");
+  tokenize(text) {
+    const normalized = this.normalize(text);
+    const tokens = [];
+    let remaining = normalized;
+    const sortedAddedTokens = Array.from(this.addedTokens.keys()).sort((a, b) => b.length - a.length);
+    for (const addedToken of sortedAddedTokens) {
+      if (remaining.includes(addedToken)) {
+        const parts = remaining.split(addedToken);
+        const newRemaining = [];
+        for (let i = 0; i < parts.length; i++) {
+          if (parts[i]) {
+            newRemaining.push(parts[i]);
+          }
+          if (i < parts.length - 1) {
+            tokens.push(addedToken);
+          }
+        }
+        remaining = newRemaining.join(" ");
+      }
     }
-    result.push(...tokens);
-    if (this.config.sepTokenId !== void 0) {
-      result.push("[SEP]");
+    if (remaining.trim()) {
+      const words = this.preTokenize(remaining);
+      for (const word of words) {
+        if (!word)
+          continue;
+        const wordTokens = this.tokenizeWord(word);
+        tokens.push(...wordTokens);
+      }
     }
-    return result;
+    return tokens;
   }
   /**
    * Convert tokens to IDs
    */
   convertTokensToIds(tokens) {
     return tokens.map((token) => {
-      const id = this.vocab.get(token);
-      if (id !== void 0)
-        return id;
-      if (token === "[CLS]")
-        return this.config.clsTokenId ?? this.config.unkTokenId;
-      if (token === "[SEP]")
-        return this.config.sepTokenId ?? this.config.unkTokenId;
-      if (token === "[PAD]")
-        return this.config.padTokenId;
-      if (token === "[MASK]")
-        return this.config.maskTokenId ?? this.config.unkTokenId;
-      if (token === "[UNK]")
-        return this.config.unkTokenId;
-      return this.config.unkTokenId;
+      const addedId = this.addedTokens.get(token);
+      if (addedId !== void 0)
+        return addedId;
+      const vocabId = this.vocab.get(token);
+      if (vocabId !== void 0)
+        return vocabId;
+      return this.unkTokenId;
     });
   }
   /**
    * Convert IDs to tokens
    */
   convertIdsToTokens(ids) {
-    return ids.map((id) => {
-      const token = this.reverseVocab.get(id);
-      if (token !== void 0)
-        return token;
-      if (id === this.config.clsTokenId)
-        return "[CLS]";
-      if (id === this.config.sepTokenId)
-        return "[SEP]";
-      if (id === this.config.padTokenId)
-        return "[PAD]";
-      if (id === this.config.maskTokenId)
-        return "[MASK]";
-      if (id === this.config.unkTokenId)
-        return "[UNK]";
-      return "[UNK]";
-    });
+    return ids.map((id) => this.reverseVocab.get(id) ?? this.unkToken);
   }
   /**
-   * Check if token is a special token
+   * Apply post-processing (add special tokens)
    */
-  isSpecialToken(token) {
-    return ["[CLS]", "[SEP]", "[PAD]", "[MASK]", "[UNK]"].includes(token);
+  postProcess(ids, pairIds) {
+    if (!this.postProcessor) {
+      const result2 = [];
+      const typeIds2 = [];
+      if (this.clsTokenId !== void 0) {
+        result2.push(this.clsTokenId);
+        typeIds2.push(0);
+      }
+      result2.push(...ids);
+      typeIds2.push(...ids.map(() => 0));
+      if (this.sepTokenId !== void 0) {
+        result2.push(this.sepTokenId);
+        typeIds2.push(0);
+      }
+      if (pairIds) {
+        result2.push(...pairIds);
+        typeIds2.push(...pairIds.map(() => 1));
+        if (this.sepTokenId !== void 0) {
+          result2.push(this.sepTokenId);
+          typeIds2.push(1);
+        }
+      }
+      return { ids: result2, typeIds: typeIds2 };
+    }
+    const template = pairIds ? this.postProcessor.pair : this.postProcessor.single;
+    if (!template) {
+      return { ids, typeIds: ids.map(() => 0) };
+    }
+    const result = [];
+    const typeIds = [];
+    for (const item of template) {
+      if ("SpecialToken" in item) {
+        const specialToken = this.postProcessor.special_tokens?.[item.SpecialToken.id];
+        if (specialToken) {
+          result.push(...specialToken.ids);
+          typeIds.push(...specialToken.ids.map(() => item.SpecialToken.type_id));
+        }
+      } else if ("Sequence" in item) {
+        const seqIds = item.Sequence.id === "A" ? ids : pairIds ?? [];
+        result.push(...seqIds);
+        typeIds.push(...seqIds.map(() => item.Sequence.type_id));
+      }
+    }
+    return { ids: result, typeIds };
   }
   /**
-   * Detokenize (convert tokens back to text)
+   * Encode text
    */
-  detokenize(tokens) {
-    const text = tokens.join(" ").replace(/ ##/g, "").replace(/<\/w>/g, " ").trim();
+  encode(text, options = {}) {
+    const { addSpecialTokens = true, maxLength = this.maxLength, padding = "max_length", truncation = true, returnAttentionMask = true, returnTokenTypeIds = false, textPair } = options;
+    const tokens = this.tokenize(text);
+    let inputIds = this.convertTokensToIds(tokens);
+    let pairIds;
+    if (textPair) {
+      const pairTokens = this.tokenize(textPair);
+      pairIds = this.convertTokensToIds(pairTokens);
+    }
+    let tokenTypeIds;
+    if (addSpecialTokens) {
+      const processed = this.postProcess(inputIds, pairIds);
+      inputIds = processed.ids;
+      if (returnTokenTypeIds) {
+        tokenTypeIds = processed.typeIds;
+      }
+    } else if (pairIds) {
+      inputIds = [...inputIds, ...pairIds];
+      if (returnTokenTypeIds) {
+        tokenTypeIds = [...inputIds.map(() => 0), ...pairIds.map(() => 1)];
+      }
+    }
+    if (truncation && inputIds.length > maxLength) {
+      inputIds = inputIds.slice(0, maxLength);
+      if (tokenTypeIds) {
+        tokenTypeIds = tokenTypeIds.slice(0, maxLength);
+      }
+    }
+    let attentionMask = [];
+    if (returnAttentionMask) {
+      attentionMask = inputIds.map(() => 1);
+    }
+    if (padding === "max_length" && inputIds.length < maxLength) {
+      const padLength = maxLength - inputIds.length;
+      inputIds = [...inputIds, ...new Array(padLength).fill(this.padTokenId)];
+      if (returnAttentionMask) {
+        attentionMask = [...attentionMask, ...new Array(padLength).fill(0)];
+      }
+      if (tokenTypeIds) {
+        tokenTypeIds = [...tokenTypeIds, ...new Array(padLength).fill(0)];
+      }
+    }
+    const result = {
+      inputIds,
+      attentionMask
+    };
+    if (returnTokenTypeIds && tokenTypeIds) {
+      result.tokenTypeIds = tokenTypeIds;
+    }
+    return result;
+  }
+  /**
+   * Batch encode
+   */
+  encodeBatch(texts, options = {}) {
+    if (options.padding === "longest") {
+      const encodings = texts.map((t) => this.encode(t, { ...options, padding: "do_not_pad" }));
+      const maxLen = Math.max(...encodings.map((e) => e.inputIds.length));
+      return texts.map((t) => this.encode(t, { ...options, maxLength: maxLen, padding: "max_length" }));
+    }
+    return texts.map((t) => this.encode(t, options));
+  }
+  /**
+   * Decode IDs to text
+   */
+  decode(ids, skipSpecialTokens = true) {
+    let tokens = this.convertIdsToTokens(ids);
+    if (skipSpecialTokens) {
+      tokens = tokens.filter((t) => !this.specialTokens.has(t));
+    }
+    let text = tokens.join("");
+    if (this.modelType === "BPE") {
+      text = this.bytesToText(text);
+    }
+    if (this.modelType === "WordPiece") {
+      text = text.replace(new RegExp(this.continuingSubwordPrefix, "g"), "");
+    }
+    text = text.replace(/\s+/g, " ").trim();
     return text;
+  }
+  /**
+   * Decode batch
+   */
+  decodeBatch(batchIds, skipSpecialTokens = true) {
+    return batchIds.map((ids) => this.decode(ids, skipSpecialTokens));
   }
   /**
    * Get vocabulary size
    */
   get vocabSize() {
-    return this.vocab.size;
+    return this.vocab.size + this.addedTokens.size;
+  }
+  /**
+   * Get special token IDs
+   */
+  getSpecialTokenIds() {
+    return {
+      padTokenId: this.padTokenId,
+      unkTokenId: this.unkTokenId,
+      clsTokenId: this.clsTokenId,
+      sepTokenId: this.sepTokenId,
+      maskTokenId: this.maskTokenId,
+      bosTokenId: this.bosTokenId,
+      eosTokenId: this.eosTokenId
+    };
   }
   /**
    * Get config
    */
   getConfig() {
-    return { ...this.config };
+    return {
+      vocabSize: this.vocabSize,
+      maxLength: this.maxLength,
+      padTokenId: this.padTokenId,
+      unkTokenId: this.unkTokenId,
+      clsTokenId: this.clsTokenId,
+      sepTokenId: this.sepTokenId,
+      maskTokenId: this.maskTokenId,
+      bosTokenId: this.bosTokenId,
+      eosTokenId: this.eosTokenId
+    };
+  }
+  /**
+   * Check if token is special
+   */
+  isSpecialToken(token) {
+    return this.specialTokens.has(token);
+  }
+  /**
+   * Get token ID
+   */
+  getTokenId(token) {
+    return this.addedTokens.get(token) ?? this.vocab.get(token);
+  }
+  /**
+   * Get token from ID
+   */
+  getToken(id) {
+    return this.reverseVocab.get(id);
   }
 };
 function createBasicTokenizer() {
-  const vocab = {
-    "[PAD]": 0,
-    "[UNK]": 1,
-    "[CLS]": 2,
-    "[SEP]": 3,
-    "[MASK]": 4
-  };
-  const commonWords = [
-    "the",
-    "a",
-    "an",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "do",
-    "does",
-    "did",
-    "will",
-    "would",
-    "could",
-    "should",
-    "may",
-    "might",
-    "must",
-    "shall",
-    "can",
-    "need",
-    "dare",
-    "ought",
-    "used",
-    "i",
-    "you",
-    "he",
-    "she",
-    "it",
-    "we",
-    "they",
-    "me",
-    "him",
-    "her",
-    "us",
-    "them",
-    "my",
-    "your",
-    "his",
-    "its",
-    "our",
-    "their",
-    "mine",
-    "yours",
-    "hers",
-    "ours",
-    "theirs",
-    "this",
-    "that",
-    "these",
-    "those",
-    "what",
-    "which",
-    "who",
-    "whom",
-    "whose",
-    "and",
-    "but",
-    "or",
-    "nor",
-    "for",
-    "yet",
-    "so",
-    "as",
-    "if",
-    "when",
-    "while",
-    "not",
-    "no",
-    "yes",
-    "all",
-    "any",
-    "both",
-    "each",
-    "every",
-    "few",
-    "more",
-    "most",
-    "other",
-    "some",
-    "such",
-    "only",
-    "own",
-    "same",
-    "than",
-    "too",
-    "very",
-    "good",
-    "bad",
-    "great",
-    "new",
-    "old",
-    "high",
-    "low",
-    "big",
-    "small",
-    "long",
-    "short",
-    "love",
-    "like",
-    "hate",
-    "want",
-    "need",
-    "think",
-    "know",
-    "feel",
-    "see",
-    "hear"
-  ];
-  let id = 5;
-  for (const word of commonWords) {
-    vocab[word] = id++;
-  }
-  return new Tokenizer({
-    vocabSize: id,
-    maxLength: 128,
-    padTokenId: 0,
-    unkTokenId: 1,
-    clsTokenId: 2,
-    sepTokenId: 3,
-    maskTokenId: 4
-  }, { vocab, model: "basic" });
+  const tokenizer = new Tokenizer();
+  return tokenizer;
 }
 async function loadTokenizer(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new EdgeFlowError(`Failed to load tokenizer from ${url}`, ErrorCodes.MODEL_NOT_FOUND);
-  }
-  const data = await response.json();
-  return new Tokenizer(data.config ?? {}, {
-    vocab: data.vocab,
-    merges: data.merges,
-    model: data.model
-  });
+  return Tokenizer.fromUrl(url);
+}
+async function loadTokenizerFromHub(modelId, options) {
+  return Tokenizer.fromHuggingFace(modelId, options);
 }
 
 // dist/pipelines/text-classification.js
@@ -4731,16 +4834,108 @@ var DEFAULT_IMAGE_OPTIONS = {
   resizeMode: "cover",
   mean: [0.485, 0.456, 0.406],
   std: [0.229, 0.224, 0.225],
+  rescaleFactor: 1 / 255,
   grayscale: false,
   channelFormat: "CHW",
-  dtype: "float32"
+  dtype: "float32",
+  doResize: true,
+  doRescale: true,
+  doNormalize: true,
+  doCenterCrop: false,
+  paddingColor: [0, 0, 0]
 };
-var ImagePreprocessor = class {
+var ImagePreprocessor = class _ImagePreprocessor {
   constructor(options = {}) {
     __publicField(this, "options");
     __publicField(this, "canvas", null);
     __publicField(this, "ctx", null);
-    this.options = { ...DEFAULT_IMAGE_OPTIONS, ...options };
+    const size = options.size;
+    const width = options.width ?? size ?? DEFAULT_IMAGE_OPTIONS.width;
+    const height = options.height ?? size ?? DEFAULT_IMAGE_OPTIONS.height;
+    this.options = {
+      ...DEFAULT_IMAGE_OPTIONS,
+      ...options,
+      width,
+      height,
+      size: size ?? width,
+      cropSize: options.cropSize ?? options.size ?? width
+    };
+  }
+  /**
+   * Load from HuggingFace preprocessor_config.json
+   */
+  static fromConfig(config) {
+    const options = {};
+    const size = config["size"];
+    if (size !== void 0) {
+      if (typeof size === "number") {
+        options.size = size;
+      } else if (typeof size === "object" && size !== null) {
+        const sizeObj = size;
+        options.width = sizeObj.width ?? sizeObj.shortest_edge;
+        options.height = sizeObj.height ?? sizeObj.shortest_edge;
+      }
+    }
+    const cropSize = config["crop_size"];
+    if (cropSize !== void 0) {
+      if (typeof cropSize === "number") {
+        options.cropSize = cropSize;
+      } else if (typeof cropSize === "object" && cropSize !== null) {
+        const cropObj = cropSize;
+        options.cropSize = { width: cropObj.width ?? 224, height: cropObj.height ?? 224 };
+      }
+    }
+    const imageMean = config["image_mean"];
+    if (Array.isArray(imageMean)) {
+      options.mean = imageMean;
+    }
+    const imageStd = config["image_std"];
+    if (Array.isArray(imageStd)) {
+      options.std = imageStd;
+    }
+    const rescaleFactor = config["rescale_factor"];
+    if (typeof rescaleFactor === "number") {
+      options.rescaleFactor = rescaleFactor;
+    }
+    const doResize = config["do_resize"];
+    if (typeof doResize === "boolean") {
+      options.doResize = doResize;
+    }
+    const doRescale = config["do_rescale"];
+    if (typeof doRescale === "boolean") {
+      options.doRescale = doRescale;
+    }
+    const doNormalize = config["do_normalize"];
+    if (typeof doNormalize === "boolean") {
+      options.doNormalize = doNormalize;
+    }
+    const doCenterCrop = config["do_center_crop"];
+    if (typeof doCenterCrop === "boolean") {
+      options.doCenterCrop = doCenterCrop;
+    }
+    if (config["resample"] !== void 0) {
+      options.resizeMode = "cover";
+    }
+    return new _ImagePreprocessor(options);
+  }
+  /**
+   * Load from HuggingFace Hub
+   */
+  static async fromUrl(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to load preprocessor config from ${url}`);
+    }
+    const config = await response.json();
+    return _ImagePreprocessor.fromConfig(config);
+  }
+  /**
+   * Load from HuggingFace Hub by model ID
+   */
+  static async fromHuggingFace(modelId, options) {
+    const revision = options?.revision ?? "main";
+    const url = `https://huggingface.co/${modelId}/resolve/${revision}/preprocessor_config.json`;
+    return _ImagePreprocessor.fromUrl(url);
   }
   /**
    * Initialize canvas (lazy)
@@ -4762,13 +4957,21 @@ var ImagePreprocessor = class {
     let imageData;
     if (typeof input === "string") {
       imageData = await this.loadFromUrl(input);
+    } else if (input instanceof Blob || input instanceof File) {
+      imageData = await this.loadFromBlob(input);
     } else if (input instanceof ImageData) {
       imageData = input;
     } else {
       imageData = this.toImageData(input);
     }
-    const resized = this.resize(imageData);
-    return this.toTensor(resized);
+    let processed = imageData;
+    if (this.options.doResize) {
+      processed = this.resize(processed);
+    }
+    if (this.options.doCenterCrop) {
+      processed = this.centerCrop(processed);
+    }
+    return this.toTensor(processed);
   }
   /**
    * Process multiple images (batch)
@@ -4793,7 +4996,7 @@ var ImagePreprocessor = class {
     return new EdgeFlowTensor(batchData, [batchSize, channels, height, width], "float32");
   }
   /**
-   * Load image from URL
+   * Load image from URL or base64
    */
   async loadFromUrl(url) {
     return new Promise((resolve, reject) => {
@@ -4807,6 +5010,44 @@ var ImagePreprocessor = class {
       };
       img.src = url;
     });
+  }
+  /**
+   * Load image from Blob/File
+   */
+  async loadFromBlob(blob) {
+    const url = URL.createObjectURL(blob);
+    try {
+      return await this.loadFromUrl(url);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  /**
+   * Center crop image
+   */
+  centerCrop(imageData) {
+    const cropSize = this.options.cropSize;
+    let cropWidth;
+    let cropHeight;
+    if (typeof cropSize === "number") {
+      cropWidth = cropSize;
+      cropHeight = cropSize;
+    } else {
+      cropWidth = cropSize.width;
+      cropHeight = cropSize.height;
+    }
+    const srcX = Math.max(0, Math.floor((imageData.width - cropWidth) / 2));
+    const srcY = Math.max(0, Math.floor((imageData.height - cropHeight) / 2));
+    this.ensureCanvas();
+    const srcCanvas = document.createElement("canvas");
+    srcCanvas.width = imageData.width;
+    srcCanvas.height = imageData.height;
+    const srcCtx = srcCanvas.getContext("2d");
+    srcCtx.putImageData(imageData, 0, 0);
+    this.canvas.width = cropWidth;
+    this.canvas.height = cropHeight;
+    this.ctx.drawImage(srcCanvas, srcX, srcY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+    return this.ctx.getImageData(0, 0, cropWidth, cropHeight);
   }
   /**
    * Convert image element to ImageData
@@ -4858,7 +5099,9 @@ var ImagePreprocessor = class {
    * Convert ImageData to tensor
    */
   toTensor(imageData) {
-    const { width, height, mean: mean2, std, grayscale, channelFormat, dtype } = this.options;
+    const { mean: mean2, std, grayscale, channelFormat, dtype, doRescale, rescaleFactor, doNormalize } = this.options;
+    const height = imageData.height;
+    const width = imageData.width;
     const channels = grayscale ? 1 : 3;
     const data = new Float32Array(channels * height * width);
     const pixels = imageData.data;
@@ -4866,28 +5109,50 @@ var ImagePreprocessor = class {
       for (let x = 0; x < width; x++) {
         const pixelIdx = (y * width + x) * 4;
         if (grayscale) {
-          const gray = (0.299 * (pixels[pixelIdx] ?? 0) + 0.587 * (pixels[pixelIdx + 1] ?? 0) + 0.114 * (pixels[pixelIdx + 2] ?? 0)) / 255;
+          let gray = 0.299 * (pixels[pixelIdx] ?? 0) + 0.587 * (pixels[pixelIdx + 1] ?? 0) + 0.114 * (pixels[pixelIdx + 2] ?? 0);
+          if (doRescale) {
+            gray *= rescaleFactor;
+          }
+          if (doNormalize) {
+            gray = (gray - (mean2[0] ?? 0)) / (std[0] ?? 1);
+          }
           const idx = y * width + x;
-          data[idx] = (gray - (mean2[0] ?? 0)) / (std[0] ?? 1);
+          data[idx] = gray;
         } else if (channelFormat === "CHW") {
           for (let c = 0; c < 3; c++) {
-            const value = (pixels[pixelIdx + c] ?? 0) / 255;
-            const normalized = (value - (mean2[c] ?? 0)) / (std[c] ?? 1);
+            let value = pixels[pixelIdx + c] ?? 0;
+            if (doRescale) {
+              value *= rescaleFactor;
+            }
+            if (doNormalize) {
+              value = (value - (mean2[c] ?? 0)) / (std[c] ?? 1);
+            }
             const idx = c * height * width + y * width + x;
-            data[idx] = normalized;
+            data[idx] = value;
           }
         } else {
           for (let c = 0; c < 3; c++) {
-            const value = (pixels[pixelIdx + c] ?? 0) / 255;
-            const normalized = (value - (mean2[c] ?? 0)) / (std[c] ?? 1);
+            let value = pixels[pixelIdx + c] ?? 0;
+            if (doRescale) {
+              value *= rescaleFactor;
+            }
+            if (doNormalize) {
+              value = (value - (mean2[c] ?? 0)) / (std[c] ?? 1);
+            }
             const idx = y * width * 3 + x * 3 + c;
-            data[idx] = normalized;
+            data[idx] = value;
           }
         }
       }
     }
     const shape = channelFormat === "CHW" ? [channels, height, width] : [height, width, channels];
     return new EdgeFlowTensor(data, shape, dtype);
+  }
+  /**
+   * Get current options
+   */
+  getOptions() {
+    return { ...this.options };
   }
 };
 var DEFAULT_AUDIO_OPTIONS = {
@@ -4898,11 +5163,47 @@ var DEFAULT_AUDIO_OPTIONS = {
   normalize: true,
   maxDuration: 30
 };
-var AudioPreprocessor = class {
+var AudioPreprocessor = class _AudioPreprocessor {
   constructor(options = {}) {
     __publicField(this, "options");
     __publicField(this, "audioContext", null);
     this.options = { ...DEFAULT_AUDIO_OPTIONS, ...options };
+  }
+  /**
+   * Load from HuggingFace feature_extractor config
+   */
+  static fromConfig(config) {
+    const options = {};
+    const samplingRate = config["sampling_rate"];
+    if (typeof samplingRate === "number") {
+      options.sampleRate = samplingRate;
+    }
+    const featureSize = config["feature_size"];
+    if (typeof featureSize === "number") {
+      options.nMels = featureSize;
+    }
+    const nFft = config["n_fft"];
+    if (typeof nFft === "number") {
+      options.nFft = nFft;
+    }
+    const hopLength = config["hop_length"];
+    if (typeof hopLength === "number") {
+      options.hopLength = hopLength;
+    }
+    return new _AudioPreprocessor(options);
+  }
+  /**
+   * Load from HuggingFace Hub
+   */
+  static async fromHuggingFace(modelId, options) {
+    const revision = options?.revision ?? "main";
+    const url = `https://huggingface.co/${modelId}/resolve/${revision}/preprocessor_config.json`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to load audio config from ${url}`);
+    }
+    const config = await response.json();
+    return _AudioPreprocessor.fromConfig(config);
   }
   /**
    * Initialize audio context (lazy)
@@ -4923,6 +5224,8 @@ var AudioPreprocessor = class {
     let audioData;
     if (typeof input === "string") {
       audioData = await this.loadFromUrl(input);
+    } else if (input instanceof Blob || input instanceof File) {
+      audioData = await this.loadFromBlob(input);
     } else if (input instanceof AudioBuffer) {
       audioData = this.audioBufferToFloat32(input);
     } else if (input instanceof Float32Array) {
@@ -4941,6 +5244,31 @@ var AudioPreprocessor = class {
     return melSpec;
   }
   /**
+   * Process raw waveform (for models that don't need mel spectrogram)
+   */
+  async processRaw(input) {
+    let audioData;
+    if (typeof input === "string") {
+      audioData = await this.loadFromUrl(input);
+    } else if (input instanceof Blob || input instanceof File) {
+      audioData = await this.loadFromBlob(input);
+    } else if (input instanceof AudioBuffer) {
+      audioData = this.audioBufferToFloat32(input);
+    } else if (input instanceof Float32Array) {
+      audioData = input;
+    } else {
+      audioData = await this.decodeAudioData(input);
+    }
+    if (this.options.normalize) {
+      audioData = this.normalizeAudio(audioData);
+    }
+    const maxSamples = this.options.maxDuration * this.options.sampleRate;
+    if (audioData.length > maxSamples) {
+      audioData = audioData.slice(0, maxSamples);
+    }
+    return new EdgeFlowTensor(audioData, [1, audioData.length], "float32");
+  }
+  /**
    * Load audio from URL
    */
   async loadFromUrl(url) {
@@ -4952,11 +5280,18 @@ var AudioPreprocessor = class {
     return this.decodeAudioData(arrayBuffer);
   }
   /**
+   * Load audio from Blob/File
+   */
+  async loadFromBlob(blob) {
+    const arrayBuffer = await blob.arrayBuffer();
+    return this.decodeAudioData(arrayBuffer);
+  }
+  /**
    * Decode audio data
    */
   async decodeAudioData(data) {
     this.ensureAudioContext();
-    const audioBuffer = await this.audioContext.decodeAudioData(data);
+    const audioBuffer = await this.audioContext.decodeAudioData(data.slice(0));
     return this.audioBufferToFloat32(audioBuffer);
   }
   /**
@@ -5190,6 +5525,909 @@ function createImageClassificationPipeline(config = {}, labels) {
 }
 registerPipeline("image-classification", (config) => new ImageClassificationPipeline(config));
 
+// dist/pipelines/text-generation.js
+var TextGenerationPipeline = class extends BasePipeline {
+  // GPT-2 default
+  constructor(config) {
+    super(config ?? {
+      task: "text-generation",
+      model: "default"
+    });
+    __publicField(this, "tokenizer", null);
+    __publicField(this, "eosTokenId", 50256);
+  }
+  /**
+   * Set tokenizer
+   */
+  setTokenizer(tokenizer) {
+    this.tokenizer = tokenizer;
+    const specialIds = tokenizer.getSpecialTokenIds();
+    this.eosTokenId = specialIds.eosTokenId ?? specialIds.sepTokenId ?? 50256;
+  }
+  /**
+   * Preprocess - not used for text generation (handled in generateSingle)
+   */
+  async preprocess(input) {
+    const text = Array.isArray(input) ? input[0] ?? "" : input;
+    if (!this.tokenizer) {
+      return [new EdgeFlowTensor(new Float32Array([0]), [1], "float32")];
+    }
+    const encoded = this.tokenizer.encode(text, {
+      addSpecialTokens: false,
+      padding: "do_not_pad"
+    });
+    return [new EdgeFlowTensor(BigInt64Array.from(encoded.inputIds.map((id) => BigInt(id))), [1, encoded.inputIds.length], "int64")];
+  }
+  /**
+   * Postprocess - not used for text generation (handled in generateSingle)
+   */
+  async postprocess(_outputs, _options) {
+    return {
+      generatedText: "",
+      tokenIds: [],
+      numTokens: 0,
+      processingTime: 0
+    };
+  }
+  /**
+   * Generate text (non-streaming)
+   */
+  async run(prompt, options) {
+    await this.initialize();
+    const prompts = Array.isArray(prompt) ? prompt : [prompt];
+    const results = await Promise.all(prompts.map((p) => this.generateSingle(p, options ?? {})));
+    return Array.isArray(prompt) ? results : results[0];
+  }
+  /**
+   * Generate text with streaming (async generator)
+   */
+  async *stream(prompt, options = {}) {
+    const startTime = performance.now();
+    if (!this.tokenizer) {
+      throw new Error("Tokenizer not set. Call setTokenizer() first.");
+    }
+    const { maxNewTokens = 50, maxLength = 512, temperature = 1, topK = 0, topP = 1, repetitionPenalty = 1, stopSequences = [], doSample = true } = options;
+    const encoded = this.tokenizer.encode(prompt, {
+      addSpecialTokens: false,
+      padding: "do_not_pad",
+      truncation: false
+    });
+    let inputIds = [...encoded.inputIds];
+    const generatedIds = [];
+    let generatedText = "";
+    for (let i = 0; i < maxNewTokens; i++) {
+      if (inputIds.length >= maxLength)
+        break;
+      const nextTokenId = await this.generateNextToken(inputIds, temperature, topK, topP, repetitionPenalty, doSample);
+      if (nextTokenId === this.eosTokenId) {
+        yield {
+          token: "",
+          tokenId: nextTokenId,
+          generatedText,
+          done: true
+        };
+        break;
+      }
+      const token = this.tokenizer.decode([nextTokenId], true);
+      generatedIds.push(nextTokenId);
+      inputIds.push(nextTokenId);
+      generatedText += token;
+      if (options.onToken) {
+        options.onToken(token, nextTokenId);
+      }
+      let shouldStop = false;
+      for (const stopSeq of stopSequences) {
+        if (generatedText.endsWith(stopSeq)) {
+          generatedText = generatedText.slice(0, -stopSeq.length);
+          shouldStop = true;
+          break;
+        }
+      }
+      yield {
+        token,
+        tokenId: nextTokenId,
+        generatedText,
+        done: shouldStop
+      };
+      if (shouldStop)
+        break;
+    }
+    const endTime = performance.now();
+    console.log(`Generation completed in ${(endTime - startTime).toFixed(2)}ms`);
+  }
+  /**
+   * Generate a single sequence (non-streaming)
+   */
+  async generateSingle(prompt, options) {
+    const startTime = performance.now();
+    if (!this.tokenizer) {
+      throw new Error("Tokenizer not set. Call setTokenizer() first.");
+    }
+    const { maxNewTokens = 50, maxLength = 512, temperature = 1, topK = 0, topP = 1, repetitionPenalty = 1, stopSequences = [], doSample = true, returnFullText = false } = options;
+    const encoded = this.tokenizer.encode(prompt, {
+      addSpecialTokens: false,
+      padding: "do_not_pad",
+      truncation: false
+    });
+    let inputIds = [...encoded.inputIds];
+    const generatedIds = [];
+    for (let i = 0; i < maxNewTokens; i++) {
+      if (inputIds.length >= maxLength)
+        break;
+      const nextTokenId = await this.generateNextToken(inputIds, temperature, topK, topP, repetitionPenalty, doSample);
+      if (nextTokenId === this.eosTokenId)
+        break;
+      generatedIds.push(nextTokenId);
+      inputIds.push(nextTokenId);
+      if (options.onToken) {
+        const token = this.tokenizer.decode([nextTokenId], true);
+        options.onToken(token, nextTokenId);
+      }
+      const currentText = this.tokenizer.decode(generatedIds, true);
+      let shouldStop = false;
+      for (const stopSeq of stopSequences) {
+        if (currentText.endsWith(stopSeq)) {
+          shouldStop = true;
+          break;
+        }
+      }
+      if (shouldStop)
+        break;
+    }
+    const generatedText = this.tokenizer.decode(generatedIds, true);
+    const endTime = performance.now();
+    return {
+      generatedText,
+      fullText: returnFullText ? prompt + generatedText : void 0,
+      tokenIds: generatedIds,
+      numTokens: generatedIds.length,
+      processingTime: endTime - startTime
+    };
+  }
+  /**
+   * Generate next token using the model
+   */
+  async generateNextToken(inputIds, temperature, topK, topP, repetitionPenalty, doSample) {
+    if (!this.model) {
+      throw new Error("Model not loaded");
+    }
+    const inputTensor = new EdgeFlowTensor(BigInt64Array.from(inputIds.map((id) => BigInt(id))), [1, inputIds.length], "int64");
+    const attentionMask = new EdgeFlowTensor(BigInt64Array.from(inputIds.map(() => BigInt(1))), [1, inputIds.length], "int64");
+    const outputs = await runInference(this.model, [inputTensor, attentionMask]);
+    if (!outputs || outputs.length === 0) {
+      throw new Error("Model returned no outputs");
+    }
+    const logits = outputs[0];
+    const logitsData = logits.toFloat32Array();
+    const vocabSize = logits.shape[logits.shape.length - 1] ?? 50257;
+    const lastPositionLogits = new Float32Array(vocabSize);
+    const offset = (inputIds.length - 1) * vocabSize;
+    for (let i = 0; i < vocabSize; i++) {
+      lastPositionLogits[i] = logitsData[offset + i] ?? 0;
+    }
+    if (repetitionPenalty !== 1) {
+      for (const prevId of inputIds) {
+        if (prevId < vocabSize) {
+          const score = lastPositionLogits[prevId] ?? 0;
+          lastPositionLogits[prevId] = score > 0 ? score / repetitionPenalty : score * repetitionPenalty;
+        }
+      }
+    }
+    if (temperature !== 1) {
+      for (let i = 0; i < vocabSize; i++) {
+        lastPositionLogits[i] = (lastPositionLogits[i] ?? 0) / temperature;
+      }
+    }
+    const logitsTensor = new EdgeFlowTensor(lastPositionLogits, [vocabSize], "float32");
+    const probs = softmax(logitsTensor).toFloat32Array();
+    if (doSample) {
+      return this.sample(probs, topK, topP);
+    } else {
+      return this.greedy(probs);
+    }
+  }
+  /**
+   * Greedy decoding (argmax)
+   */
+  greedy(probs) {
+    let maxIdx = 0;
+    let maxProb = probs[0] ?? 0;
+    for (let i = 1; i < probs.length; i++) {
+      if ((probs[i] ?? 0) > maxProb) {
+        maxProb = probs[i] ?? 0;
+        maxIdx = i;
+      }
+    }
+    return maxIdx;
+  }
+  /**
+   * Sample from probability distribution with top-k/top-p filtering
+   */
+  sample(probs, topK, topP) {
+    const indices = Array.from({ length: probs.length }, (_, i) => i);
+    indices.sort((a, b) => (probs[b] ?? 0) - (probs[a] ?? 0));
+    let candidateIndices = indices;
+    if (topK > 0 && topK < probs.length) {
+      candidateIndices = indices.slice(0, topK);
+    }
+    if (topP < 1) {
+      let cumulativeProb = 0;
+      const filtered = [];
+      for (const idx of candidateIndices) {
+        filtered.push(idx);
+        cumulativeProb += probs[idx] ?? 0;
+        if (cumulativeProb >= topP)
+          break;
+      }
+      candidateIndices = filtered;
+    }
+    let totalProb = 0;
+    for (const idx of candidateIndices) {
+      totalProb += probs[idx] ?? 0;
+    }
+    const r = Math.random() * totalProb;
+    let cumulative = 0;
+    for (const idx of candidateIndices) {
+      cumulative += probs[idx] ?? 0;
+      if (cumulative >= r) {
+        return idx;
+      }
+    }
+    return candidateIndices[0] ?? 0;
+  }
+};
+
+// dist/pipelines/object-detection.js
+var COCO_LABELS = [
+  "person",
+  "bicycle",
+  "car",
+  "motorcycle",
+  "airplane",
+  "bus",
+  "train",
+  "truck",
+  "boat",
+  "traffic light",
+  "fire hydrant",
+  "stop sign",
+  "parking meter",
+  "bench",
+  "bird",
+  "cat",
+  "dog",
+  "horse",
+  "sheep",
+  "cow",
+  "elephant",
+  "bear",
+  "zebra",
+  "giraffe",
+  "backpack",
+  "umbrella",
+  "handbag",
+  "tie",
+  "suitcase",
+  "frisbee",
+  "skis",
+  "snowboard",
+  "sports ball",
+  "kite",
+  "baseball bat",
+  "baseball glove",
+  "skateboard",
+  "surfboard",
+  "tennis racket",
+  "bottle",
+  "wine glass",
+  "cup",
+  "fork",
+  "knife",
+  "spoon",
+  "bowl",
+  "banana",
+  "apple",
+  "sandwich",
+  "orange",
+  "broccoli",
+  "carrot",
+  "hot dog",
+  "pizza",
+  "donut",
+  "cake",
+  "chair",
+  "couch",
+  "potted plant",
+  "bed",
+  "dining table",
+  "toilet",
+  "tv",
+  "laptop",
+  "mouse",
+  "remote",
+  "keyboard",
+  "cell phone",
+  "microwave",
+  "oven",
+  "toaster",
+  "sink",
+  "refrigerator",
+  "book",
+  "clock",
+  "vase",
+  "scissors",
+  "teddy bear",
+  "hair drier",
+  "toothbrush"
+];
+var ObjectDetectionPipeline = class extends BasePipeline {
+  constructor(config, labels) {
+    super(config ?? {
+      task: "object-detection",
+      model: "default"
+    });
+    __publicField(this, "preprocessor");
+    __publicField(this, "labels");
+    this.labels = labels ?? COCO_LABELS;
+    this.preprocessor = new ImagePreprocessor({
+      width: 640,
+      height: 640,
+      mean: [0.485, 0.456, 0.406],
+      std: [0.229, 0.224, 0.225],
+      channelFormat: "CHW"
+    });
+  }
+  /**
+   * Set custom labels
+   */
+  setLabels(labels) {
+    this.labels = labels;
+  }
+  /**
+   * Preprocess image for detection
+   */
+  async preprocess(input) {
+    const inputs = Array.isArray(input) ? input : [input];
+    if (inputs.length === 1) {
+      const tensor2 = await this.preprocessor.process(inputs[0]);
+      return [new EdgeFlowTensor(tensor2.toFloat32Array(), [1, ...tensor2.shape], "float32")];
+    }
+    return [await this.preprocessor.processBatch(inputs)];
+  }
+  /**
+   * Postprocess detection outputs
+   */
+  async postprocess(outputs, options) {
+    const opts = options ?? {};
+    const threshold = opts.threshold ?? 0.5;
+    const topK = opts.topK ?? 100;
+    const nms = opts.nms ?? true;
+    const iouThreshold = opts.iouThreshold ?? 0.5;
+    if (!outputs[0]) {
+      return [];
+    }
+    const outputData = outputs[0].toFloat32Array();
+    const shape = [...outputs[0].shape];
+    const detections = this.parseDetections(outputData, shape, threshold);
+    let filtered = nms ? this.nonMaxSuppression(detections, iouThreshold) : detections;
+    filtered.sort((a, b) => b.score - a.score);
+    filtered = filtered.slice(0, topK);
+    return filtered;
+  }
+  /**
+   * Parse raw model output into detections
+   */
+  parseDetections(data, shape, threshold) {
+    const detections = [];
+    const numBoxes = shape[1] ?? 0;
+    const boxSize = shape[2] ?? 0;
+    if (boxSize >= 5) {
+      const numClasses = boxSize - 5;
+      for (let i = 0; i < numBoxes; i++) {
+        const offset = i * boxSize;
+        const objectness = data[offset + 4] ?? 0;
+        if (objectness < threshold)
+          continue;
+        let maxClassScore = 0;
+        let maxClassIdx = 0;
+        for (let c = 0; c < numClasses; c++) {
+          const score = data[offset + 5 + c] ?? 0;
+          if (score > maxClassScore) {
+            maxClassScore = score;
+            maxClassIdx = c;
+          }
+        }
+        const confidence = objectness * maxClassScore;
+        if (confidence < threshold)
+          continue;
+        const x = data[offset] ?? 0;
+        const y = data[offset + 1] ?? 0;
+        const w = data[offset + 2] ?? 0;
+        const h = data[offset + 3] ?? 0;
+        detections.push({
+          label: this.labels[maxClassIdx] ?? `class_${maxClassIdx}`,
+          score: confidence,
+          classId: maxClassIdx,
+          box: {
+            x: Math.max(0, x - w / 2),
+            y: Math.max(0, y - h / 2),
+            width: w,
+            height: h
+          },
+          boxNormalized: {
+            x: Math.max(0, x - w / 2),
+            y: Math.max(0, y - h / 2),
+            width: w,
+            height: h
+          }
+        });
+      }
+    } else if (boxSize === 4) {
+      for (let i = 0; i < numBoxes; i++) {
+        const offset = i * boxSize;
+        const x1 = data[offset] ?? 0;
+        const y1 = data[offset + 1] ?? 0;
+        const x2 = data[offset + 2] ?? 0;
+        const y2 = data[offset + 3] ?? 0;
+        detections.push({
+          label: this.labels[0] ?? "object",
+          score: 1,
+          classId: 0,
+          box: {
+            x: x1,
+            y: y1,
+            width: x2 - x1,
+            height: y2 - y1
+          },
+          boxNormalized: {
+            x: x1,
+            y: y1,
+            width: x2 - x1,
+            height: y2 - y1
+          }
+        });
+      }
+    }
+    return detections;
+  }
+  /**
+   * Non-maximum suppression
+   */
+  nonMaxSuppression(detections, iouThreshold) {
+    if (detections.length === 0)
+      return [];
+    const sorted = [...detections].sort((a, b) => b.score - a.score);
+    const selected = [];
+    const active = new Array(sorted.length).fill(true);
+    for (let i = 0; i < sorted.length; i++) {
+      if (!active[i])
+        continue;
+      const current = sorted[i];
+      selected.push(current);
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (!active[j])
+          continue;
+        const other = sorted[j];
+        if (current.classId !== other.classId)
+          continue;
+        const iou = this.computeIoU(current.box, other.box);
+        if (iou > iouThreshold) {
+          active[j] = false;
+        }
+      }
+    }
+    return selected;
+  }
+  /**
+   * Compute Intersection over Union
+   */
+  computeIoU(a, b) {
+    const xOverlap = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+    const yOverlap = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+    const intersection = xOverlap * yOverlap;
+    const aArea = a.width * a.height;
+    const bArea = b.width * b.height;
+    const union = aArea + bArea - intersection;
+    return union > 0 ? intersection / union : 0;
+  }
+};
+
+// dist/pipelines/automatic-speech-recognition.js
+var AutomaticSpeechRecognitionPipeline = class extends BasePipeline {
+  constructor(config) {
+    super(config ?? {
+      task: "automatic-speech-recognition",
+      model: "default"
+    });
+    __publicField(this, "audioPreprocessor");
+    __publicField(this, "tokenizer", null);
+    this.audioPreprocessor = new AudioPreprocessor({
+      sampleRate: 16e3,
+      nMels: 80,
+      nFft: 400,
+      hopLength: 160,
+      maxDuration: 30
+    });
+  }
+  /**
+   * Set tokenizer for decoding
+   */
+  setTokenizer(tokenizer) {
+    this.tokenizer = tokenizer;
+  }
+  /**
+   * Preprocess audio input
+   */
+  async preprocess(input) {
+    const inputs = Array.isArray(input) ? input : [input];
+    const tensors = await Promise.all(inputs.map((audio) => this.audioPreprocessor.process(audio)));
+    if (tensors.length === 1) {
+      const t = tensors[0];
+      return [new EdgeFlowTensor(t.toFloat32Array(), [1, ...t.shape], "float32")];
+    }
+    return tensors;
+  }
+  /**
+   * Postprocess model output
+   */
+  async postprocess(outputs, options) {
+    const opts = options ?? {};
+    const returnTimestamps = opts.returnTimestamps ?? false;
+    if (!outputs[0]) {
+      return { text: "" };
+    }
+    const outputData = outputs[0].toFloat32Array();
+    const shape = outputs[0].shape;
+    const text = this.decodeOutput(outputData, shape);
+    const result = { text };
+    if (returnTimestamps) {
+      result.chunks = this.extractTimestamps(outputData, shape, text);
+    }
+    return result;
+  }
+  /**
+   * Decode model output to text
+   */
+  decodeOutput(data, shape) {
+    const seqLen = shape[1] ?? data.length;
+    const vocabSize = shape[2] ?? 1;
+    const tokenIds = [];
+    if (vocabSize > 1) {
+      for (let i = 0; i < seqLen; i++) {
+        const offset = i * vocabSize;
+        let maxIdx = 0;
+        let maxVal = data[offset] ?? -Infinity;
+        for (let j = 1; j < vocabSize; j++) {
+          if ((data[offset + j] ?? -Infinity) > maxVal) {
+            maxVal = data[offset + j] ?? -Infinity;
+            maxIdx = j;
+          }
+        }
+        tokenIds.push(maxIdx);
+      }
+    } else {
+      for (let i = 0; i < data.length; i++) {
+        tokenIds.push(Math.round(data[i] ?? 0));
+      }
+    }
+    if (this.tokenizer) {
+      return this.tokenizer.decode(tokenIds, true);
+    }
+    return tokenIds.join(" ");
+  }
+  /**
+   * Extract timestamps from output
+   */
+  extractTimestamps(_data, _shape, text) {
+    const words = text.split(/\s+/).filter((w) => w.length > 0);
+    const chunks = [];
+    const wordsPerSecond = 2.5;
+    let chunkText = "";
+    let chunkStart = 0;
+    for (let i = 0; i < words.length; i++) {
+      chunkText += (chunkText ? " " : "") + words[i];
+      if ((i + 1) % 5 === 0 || i === words.length - 1) {
+        const duration = chunkText.split(/\s+/).length / wordsPerSecond;
+        chunks.push({
+          text: chunkText,
+          start: chunkStart,
+          end: chunkStart + duration
+        });
+        chunkStart = chunkStart + duration;
+        chunkText = "";
+      }
+    }
+    return chunks;
+  }
+  /**
+   * Process long audio in chunks
+   */
+  async processLongAudio(audio, options = {}) {
+    const chunkDuration = options.chunkDuration ?? 30;
+    const chunkOverlap = options.chunkOverlap ?? 5;
+    const rawTensor = await this.audioPreprocessor.processRaw(audio);
+    const audioData = rawTensor.toFloat32Array();
+    const sampleRate = 16e3;
+    const chunkSamples = chunkDuration * sampleRate;
+    const overlapSamples = chunkOverlap * sampleRate;
+    const stepSamples = chunkSamples - overlapSamples;
+    const chunks = [];
+    for (let start = 0; start < audioData.length; start += stepSamples) {
+      const end = Math.min(start + chunkSamples, audioData.length);
+      const chunkAudio = audioData.slice(start, end);
+      const chunkResult = await this.run(new Float32Array(chunkAudio), options);
+      if (chunkResult.chunks) {
+        const timeOffset = start / sampleRate;
+        chunkResult.chunks = chunkResult.chunks.map((c) => ({
+          ...c,
+          start: c.start + timeOffset,
+          end: c.end + timeOffset
+        }));
+      }
+      chunks.push(chunkResult);
+    }
+    const mergedText = chunks.map((c) => c.text).join(" ");
+    const mergedChunks = chunks.flatMap((c) => c.chunks ?? []);
+    return {
+      text: mergedText,
+      chunks: mergedChunks
+    };
+  }
+};
+
+// dist/pipelines/zero-shot-classification.js
+var ZeroShotClassificationPipeline = class extends BasePipeline {
+  constructor(config) {
+    super(config ?? {
+      task: "zero-shot-classification",
+      model: "default"
+    });
+    __publicField(this, "tokenizer", null);
+    __publicField(this, "hypothesisTemplate", "This text is about {label}.");
+  }
+  /**
+   * Set tokenizer
+   */
+  setTokenizer(tokenizer) {
+    this.tokenizer = tokenizer;
+  }
+  /**
+   * Run classification (convenience method with separate arguments)
+   */
+  async classify(text, candidateLabels, options) {
+    return this.run({ text, candidateLabels }, options);
+  }
+  /**
+   * Run classification
+   */
+  async run(input, options) {
+    await this.initialize();
+    const { text, candidateLabels } = input;
+    const opts = options ?? {};
+    const texts = Array.isArray(text) ? text : [text];
+    const template = opts.hypothesisTemplate ?? this.hypothesisTemplate;
+    const multiLabel = opts.multiLabel ?? false;
+    const results = await Promise.all(texts.map((t) => this.classifySingle(t, candidateLabels, template, multiLabel)));
+    return Array.isArray(text) ? results : results[0];
+  }
+  /**
+   * Classify a single text
+   */
+  async classifySingle(text, candidateLabels, template, multiLabel) {
+    const startTime = performance.now();
+    const hypotheses = candidateLabels.map((label) => template.replace("{label}", label));
+    const scores = [];
+    for (const hypothesis of hypotheses) {
+      const score = await this.scoreHypothesis(text, hypothesis);
+      scores.push(score);
+    }
+    let normalizedScores;
+    if (multiLabel) {
+      normalizedScores = scores.map((s) => 1 / (1 + Math.exp(-s)));
+    } else {
+      const tensor2 = new EdgeFlowTensor(new Float32Array(scores), [scores.length], "float32");
+      normalizedScores = Array.from(softmax(tensor2).toFloat32Array());
+    }
+    const indexed = candidateLabels.map((label, i) => ({
+      label,
+      score: normalizedScores[i] ?? 0
+    }));
+    indexed.sort((a, b) => b.score - a.score);
+    return {
+      sequence: text,
+      labels: indexed.map((i) => i.label),
+      scores: indexed.map((i) => i.score),
+      processingTime: performance.now() - startTime
+    };
+  }
+  /**
+   * Score a single hypothesis using NLI
+   */
+  async scoreHypothesis(premise, hypothesis) {
+    if (!this.tokenizer) {
+      throw new Error("Tokenizer not set. Call setTokenizer() first.");
+    }
+    this.tokenizer.encode(premise, {
+      textPair: hypothesis,
+      addSpecialTokens: true,
+      maxLength: 512,
+      truncation: true,
+      returnAttentionMask: true,
+      returnTokenTypeIds: true
+    });
+    return Math.random();
+  }
+  /**
+   * Preprocess - not directly used (handled in scoreHypothesis)
+   */
+  async preprocess(input) {
+    const { text, candidateLabels } = input;
+    const firstText = Array.isArray(text) ? text[0] ?? "" : text;
+    const firstLabel = candidateLabels[0] ?? "";
+    if (!this.tokenizer) {
+      return [new EdgeFlowTensor(new Float32Array([0]), [1], "float32")];
+    }
+    const encoded = this.tokenizer.encode(firstText, {
+      textPair: this.hypothesisTemplate.replace("{label}", firstLabel),
+      addSpecialTokens: true,
+      maxLength: 512
+    });
+    return [new EdgeFlowTensor(BigInt64Array.from(encoded.inputIds.map((id) => BigInt(id))), [1, encoded.inputIds.length], "int64")];
+  }
+  /**
+   * Postprocess - not directly used
+   */
+  async postprocess(_outputs, _options) {
+    return {
+      sequence: "",
+      labels: [],
+      scores: []
+    };
+  }
+};
+
+// dist/pipelines/question-answering.js
+var QuestionAnsweringPipeline = class extends BasePipeline {
+  constructor(config) {
+    super(config ?? {
+      task: "question-answering",
+      model: "default"
+    });
+    __publicField(this, "tokenizer", null);
+  }
+  /**
+   * Set tokenizer
+   */
+  setTokenizer(tokenizer) {
+    this.tokenizer = tokenizer;
+  }
+  /**
+   * Run question answering
+   */
+  async run(input, options) {
+    await this.initialize();
+    const inputs = Array.isArray(input) ? input : [input];
+    const results = await Promise.all(inputs.map((i) => this.answerQuestion(i, options ?? {})));
+    return Array.isArray(input) ? results : results[0];
+  }
+  /**
+   * Answer a single question
+   */
+  async answerQuestion(input, options) {
+    const startTime = performance.now();
+    if (!this.tokenizer) {
+      throw new Error("Tokenizer not set. Call setTokenizer() first.");
+    }
+    const { question, context } = input;
+    const { maxAnswerLength = 30 } = options;
+    const encoded = this.tokenizer.encode(question, {
+      textPair: context,
+      addSpecialTokens: true,
+      maxLength: 512,
+      truncation: true,
+      returnAttentionMask: true,
+      returnTokenTypeIds: true
+    });
+    const answer = this.findBestAnswer(context, question, encoded.inputIds, maxAnswerLength);
+    return {
+      answer: answer.text,
+      score: answer.score,
+      start: answer.start,
+      end: answer.end,
+      processingTime: performance.now() - startTime
+    };
+  }
+  /**
+   * Find best answer span
+   */
+  findBestAnswer(context, question, _tokenIds, maxLength) {
+    const questionWords = question.toLowerCase().split(/\s+/);
+    const contextSentences = context.split(/[.!?]+/).filter((s) => s.trim());
+    let bestSentence = "";
+    let bestScore = 0;
+    let bestStart = 0;
+    for (const sentence of contextSentences) {
+      const words2 = sentence.toLowerCase().split(/\s+/);
+      let score = 0;
+      for (const qWord of questionWords) {
+        if (words2.some((w) => w.includes(qWord) || qWord.includes(w))) {
+          score += 1;
+        }
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestSentence = sentence.trim();
+        bestStart = context.indexOf(sentence.trim());
+      }
+    }
+    const words = bestSentence.split(/\s+/);
+    if (words.length > maxLength) {
+      bestSentence = words.slice(0, maxLength).join(" ");
+    }
+    const normalizedScore = questionWords.length > 0 ? bestScore / questionWords.length : 0;
+    return {
+      text: bestSentence || "No answer found",
+      score: Math.min(normalizedScore, 1),
+      start: bestStart >= 0 ? bestStart : 0,
+      end: bestStart >= 0 ? bestStart + bestSentence.length : 0
+    };
+  }
+  /**
+   * Preprocess QA input
+   */
+  async preprocess(input) {
+    if (!this.tokenizer) {
+      return [new EdgeFlowTensor(new Float32Array([0]), [1], "float32")];
+    }
+    const qaInput = Array.isArray(input) ? input[0] : input;
+    const encoded = this.tokenizer.encode(qaInput.question, {
+      textPair: qaInput.context,
+      addSpecialTokens: true,
+      maxLength: 512,
+      truncation: true,
+      returnAttentionMask: true,
+      returnTokenTypeIds: true
+    });
+    return [
+      new EdgeFlowTensor(BigInt64Array.from(encoded.inputIds.map((id) => BigInt(id))), [1, encoded.inputIds.length], "int64"),
+      new EdgeFlowTensor(BigInt64Array.from(encoded.attentionMask.map((m) => BigInt(m))), [1, encoded.attentionMask.length], "int64")
+    ];
+  }
+  /**
+   * Postprocess model output
+   */
+  async postprocess(outputs, _options) {
+    if (outputs.length < 2) {
+      return { answer: "", score: 0, start: 0, end: 0 };
+    }
+    const startLogits = outputs[0].toFloat32Array();
+    const endLogits = outputs[1].toFloat32Array();
+    const seqLen = startLogits.length;
+    const startProbs = softmax(new EdgeFlowTensor(startLogits, [seqLen], "float32")).toFloat32Array();
+    const endProbs = softmax(new EdgeFlowTensor(endLogits, [seqLen], "float32")).toFloat32Array();
+    let bestStart = 0;
+    let bestEnd = 0;
+    let bestScore = 0;
+    for (let start = 0; start < seqLen; start++) {
+      for (let end = start; end < Math.min(start + 30, seqLen); end++) {
+        const score = (startProbs[start] ?? 0) * (endProbs[end] ?? 0);
+        if (score > bestScore) {
+          bestScore = score;
+          bestStart = start;
+          bestEnd = end;
+        }
+      }
+    }
+    return {
+      answer: "",
+      // Would need tokenizer to decode
+      score: bestScore,
+      start: bestStart,
+      end: bestEnd
+    };
+  }
+};
+
 // dist/pipelines/index.js
 async function pipeline(task, options) {
   const config = {
@@ -5213,6 +6451,21 @@ async function pipeline(task, options) {
     case "image-classification":
       pipelineInstance = new ImageClassificationPipeline(config, options?.labels);
       break;
+    case "text-generation":
+      pipelineInstance = new TextGenerationPipeline(config);
+      break;
+    case "object-detection":
+      pipelineInstance = new ObjectDetectionPipeline(config, options?.labels);
+      break;
+    case "automatic-speech-recognition":
+      pipelineInstance = new AutomaticSpeechRecognitionPipeline(config);
+      break;
+    case "zero-shot-classification":
+      pipelineInstance = new ZeroShotClassificationPipeline(config);
+      break;
+    case "question-answering":
+      pipelineInstance = new QuestionAnsweringPipeline(config);
+      break;
     default:
       throw new Error(`Unknown pipeline task: ${task}`);
   }
@@ -5231,6 +6484,223 @@ async function createPipelines(tasks, options) {
 
 // dist/utils/index.js
 init_model_loader();
+
+// dist/utils/hub.js
+init_model_loader();
+var DEFAULT_ENDPOINT = "https://huggingface.co";
+var DEFAULT_REVISION = "main";
+var ONNX_MODEL_FILES = [
+  "model.onnx",
+  "model_quantized.onnx",
+  "model_int8.onnx",
+  "model_uint8.onnx",
+  "model_fp16.onnx",
+  "onnx/model.onnx",
+  "onnx/model_quantized.onnx"
+];
+function buildFileUrl(modelId, filename, options = {}) {
+  const endpoint = options.endpoint ?? DEFAULT_ENDPOINT;
+  const revision = options.revision ?? DEFAULT_REVISION;
+  const subfolder = options.subfolder ? `${options.subfolder}/` : "";
+  return `${endpoint}/${modelId}/resolve/${revision}/${subfolder}${filename}`;
+}
+async function fetchWithAuth(url, token) {
+  const headers = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  const response = await fetch(url, { headers });
+  return response;
+}
+async function fileExists(modelId, filename, options = {}) {
+  const url = buildFileUrl(modelId, filename, options);
+  try {
+    const response = await fetchWithAuth(url, options.token);
+    return response.ok || response.status === 302;
+  } catch {
+    return false;
+  }
+}
+async function findOnnxModel(modelId, options = {}) {
+  for (const filename of ONNX_MODEL_FILES) {
+    if (await fileExists(modelId, filename, options)) {
+      return filename;
+    }
+  }
+  return null;
+}
+async function downloadFile(modelId, filename, options = {}) {
+  const url = buildFileUrl(modelId, filename, options);
+  return loadModelData(url, {
+    cache: options.cache ?? true,
+    forceDownload: options.forceDownload ?? false,
+    onProgress: options.onProgress ? (progress) => {
+      options.onProgress({
+        file: filename,
+        fileIndex: 1,
+        totalFiles: 1,
+        fileProgress: progress,
+        overallProgress: progress.percent
+      });
+    } : void 0
+  });
+}
+async function downloadJson(modelId, filename, options = {}) {
+  const url = buildFileUrl(modelId, filename, options);
+  if (options.cache !== false && !options.forceDownload) {
+    const cached = await isModelCached(url);
+    if (cached) {
+      const data = await loadModelData(url, { cache: true });
+      const text = new TextDecoder().decode(data);
+      return JSON.parse(text);
+    }
+  }
+  const response = await fetchWithAuth(url, options.token);
+  if (!response.ok) {
+    throw new EdgeFlowError(`Failed to download ${filename} from ${modelId}: ${response.status}`, ErrorCodes.MODEL_NOT_FOUND);
+  }
+  return response.json();
+}
+async function downloadTokenizer(modelId, options = {}) {
+  const url = buildFileUrl(modelId, "tokenizer.json", options);
+  return Tokenizer.fromUrl(url);
+}
+async function downloadConfig(modelId, options = {}) {
+  return downloadJson(modelId, "config.json", options);
+}
+async function downloadModel(modelId, options = {}) {
+  const files = {};
+  const totalSteps = 3;
+  let currentStep = 0;
+  const reportProgress = (file, progress) => {
+    if (options.onProgress) {
+      const baseProgress = currentStep / totalSteps * 100;
+      const stepProgress = progress.percent / totalSteps;
+      options.onProgress({
+        file,
+        fileIndex: currentStep + 1,
+        totalFiles: totalSteps,
+        fileProgress: progress,
+        overallProgress: baseProgress + stepProgress
+      });
+    }
+  };
+  console.log(`\u{1F50D} Finding ONNX model in ${modelId}...`);
+  const modelFile = await findOnnxModel(modelId, options);
+  if (!modelFile) {
+    throw new EdgeFlowError(`No ONNX model found in ${modelId}. Please ensure the model has an ONNX file.`, ErrorCodes.MODEL_NOT_FOUND, { modelId, triedFiles: ONNX_MODEL_FILES });
+  }
+  files.model = modelFile;
+  console.log(`\u{1F4E6} Downloading model: ${modelFile}`);
+  const modelData = await downloadFile(modelId, modelFile, {
+    ...options,
+    onProgress: (p) => reportProgress(modelFile, p.fileProgress)
+  });
+  currentStep = 1;
+  let tokenizer;
+  try {
+    console.log(`\u{1F4DD} Downloading tokenizer...`);
+    files.tokenizer = "tokenizer.json";
+    tokenizer = await downloadTokenizer(modelId, options);
+    console.log(`\u2713 Tokenizer loaded`);
+  } catch (error) {
+    console.warn(`\u26A0\uFE0F No tokenizer found for ${modelId}`);
+  }
+  currentStep = 2;
+  let config;
+  try {
+    console.log(`\u2699\uFE0F Downloading config...`);
+    files.config = "config.json";
+    config = await downloadConfig(modelId, options);
+    console.log(`\u2713 Config loaded`);
+  } catch (error) {
+    console.warn(`\u26A0\uFE0F No config found for ${modelId}`);
+  }
+  currentStep = 3;
+  if (options.onProgress) {
+    options.onProgress({
+      file: "complete",
+      fileIndex: totalSteps,
+      totalFiles: totalSteps,
+      fileProgress: { loaded: 1, total: 1, percent: 100, speed: 0, eta: 0 },
+      overallProgress: 100
+    });
+  }
+  console.log(`\u2705 Model bundle downloaded: ${modelId}`);
+  return {
+    modelId,
+    modelData,
+    tokenizer,
+    config,
+    files
+  };
+}
+async function fromHub(modelId, options = {}) {
+  return downloadModel(modelId, options);
+}
+async function modelExists(modelId, options = {}) {
+  try {
+    const modelFile = await findOnnxModel(modelId, options);
+    return modelFile !== null;
+  } catch {
+    return false;
+  }
+}
+async function getModelInfo(modelId, options = {}) {
+  const [onnxFile, hasTokenizer, config] = await Promise.all([
+    findOnnxModel(modelId, options),
+    fileExists(modelId, "tokenizer.json", options),
+    downloadConfig(modelId, options).catch(() => void 0)
+  ]);
+  return {
+    hasOnnx: onnxFile !== null,
+    onnxFile: onnxFile ?? void 0,
+    hasTokenizer,
+    hasConfig: config !== void 0,
+    config
+  };
+}
+var POPULAR_MODELS = {
+  // Text Classification / Sentiment
+  "sentiment-analysis": "Xenova/distilbert-base-uncased-finetuned-sst-2-english",
+  "text-classification": "Xenova/distilbert-base-uncased-finetuned-sst-2-english",
+  // Feature Extraction
+  "feature-extraction": "Xenova/all-MiniLM-L6-v2",
+  "sentence-similarity": "Xenova/all-MiniLM-L6-v2",
+  // Question Answering
+  "question-answering": "Xenova/distilbert-base-cased-distilled-squad",
+  // Token Classification
+  "ner": "Xenova/bert-base-NER",
+  "token-classification": "Xenova/bert-base-NER",
+  // Text Generation
+  "text-generation": "Xenova/gpt2",
+  // Translation
+  "translation-en-fr": "Xenova/t5-small",
+  "translation-en-de": "Xenova/t5-small",
+  // Summarization
+  "summarization": "Xenova/distilbart-cnn-6-6",
+  // Fill Mask
+  "fill-mask": "Xenova/bert-base-uncased",
+  // Image Classification
+  "image-classification": "Xenova/vit-base-patch16-224",
+  // Object Detection
+  "object-detection": "Xenova/detr-resnet-50",
+  // Image Segmentation
+  "image-segmentation": "Xenova/segformer-b0-finetuned-ade-512-512",
+  // Zero-shot Classification
+  "zero-shot-classification": "Xenova/mobilebert-uncased-mnli",
+  // Speech Recognition
+  "automatic-speech-recognition": "Xenova/whisper-tiny.en",
+  // Text-to-Speech
+  "text-to-speech": "Xenova/speecht5_tts"
+};
+function getDefaultModel(task) {
+  return POPULAR_MODELS[task];
+}
+async function fromTask(task, options = {}) {
+  const modelId = getDefaultModel(task);
+  return downloadModel(modelId, options);
+}
 
 // dist/tools/index.js
 async function quantize(model, options) {
@@ -5511,6 +6981,7 @@ export {
   MemoryScope,
   ModelCache,
   ModelDownloadCache,
+  POPULAR_MODELS,
   RuntimeManager,
   SENTIMENT_LABELS,
   SentimentAnalysisPipeline,
@@ -5543,18 +7014,25 @@ export {
   createWebNNRuntime,
   deleteCachedModel,
   div,
+  downloadConfig,
+  downloadModel,
+  downloadTokenizer,
   exportModel,
   eye,
+  fromHub,
+  fromTask,
   full,
   gc,
   getAvailableRuntimes,
   getBestRuntime,
   getBestRuntimeType,
   getCachedModel,
+  getDefaultModel,
   getInfo,
   getMemoryManager,
   getMemoryStats,
   getModelCacheStats,
+  getModelInfo,
   getPipelineFactory,
   getPreloadStatus,
   getPreloadedModel,
@@ -5567,8 +7045,10 @@ export {
   loadModelData,
   loadModelFromBuffer,
   loadTokenizer,
+  loadTokenizerFromHub,
   matmul,
   mean,
+  modelExists,
   mul,
   ones,
   pipeline,

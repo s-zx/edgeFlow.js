@@ -9,10 +9,25 @@ export { TextClassificationPipeline, SentimentAnalysisPipeline, createTextClassi
 export { FeatureExtractionPipeline, createFeatureExtractionPipeline, } from './feature-extraction.js';
 // Image Classification
 export { ImageClassificationPipeline, createImageClassificationPipeline, } from './image-classification.js';
+// Text Generation
+export { TextGenerationPipeline, createTextGenerationPipeline, } from './text-generation.js';
+// Object Detection
+export { ObjectDetectionPipeline, createObjectDetectionPipeline, COCO_LABELS, } from './object-detection.js';
+// Automatic Speech Recognition
+export { AutomaticSpeechRecognitionPipeline, createASRPipeline, } from './automatic-speech-recognition.js';
+// Zero-shot Classification
+export { ZeroShotClassificationPipeline, createZeroShotClassificationPipeline, } from './zero-shot-classification.js';
+// Question Answering
+export { QuestionAnsweringPipeline, createQuestionAnsweringPipeline, } from './question-answering.js';
 // Import pipeline classes
 import { TextClassificationPipeline, SentimentAnalysisPipeline } from './text-classification.js';
 import { FeatureExtractionPipeline } from './feature-extraction.js';
 import { ImageClassificationPipeline } from './image-classification.js';
+import { TextGenerationPipeline } from './text-generation.js';
+import { ObjectDetectionPipeline } from './object-detection.js';
+import { AutomaticSpeechRecognitionPipeline } from './automatic-speech-recognition.js';
+import { ZeroShotClassificationPipeline } from './zero-shot-classification.js';
+import { QuestionAnsweringPipeline } from './question-answering.js';
 /**
  * Create a pipeline for a specific task
  *
@@ -49,6 +64,21 @@ export async function pipeline(task, options) {
             break;
         case 'image-classification':
             pipelineInstance = new ImageClassificationPipeline(config, options?.labels);
+            break;
+        case 'text-generation':
+            pipelineInstance = new TextGenerationPipeline(config);
+            break;
+        case 'object-detection':
+            pipelineInstance = new ObjectDetectionPipeline(config, options?.labels);
+            break;
+        case 'automatic-speech-recognition':
+            pipelineInstance = new AutomaticSpeechRecognitionPipeline(config);
+            break;
+        case 'zero-shot-classification':
+            pipelineInstance = new ZeroShotClassificationPipeline(config);
+            break;
+        case 'question-answering':
+            pipelineInstance = new QuestionAnsweringPipeline(config);
             break;
         default:
             throw new Error(`Unknown pipeline task: ${task}`);

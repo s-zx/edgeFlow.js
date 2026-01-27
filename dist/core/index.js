@@ -11,4 +11,6 @@ export { InferenceScheduler, getScheduler, setScheduler, configureScheduler, } f
 export { MemoryManager, MemoryScope, ModelCache, withMemoryScope, withMemoryScopeSync, getMemoryManager, getMemoryStats, release, gc, } from './memory.js';
 // Runtime
 export { RuntimeManager, LoadedModelImpl, loadModel, loadModelFromBuffer, runInference, runBatchInference, getRuntimeManager, registerRuntime, getBestRuntime, getAvailableRuntimes, } from './runtime.js';
+// Worker
+export { InferenceWorker, WorkerPool, getWorkerPool, runInWorker, isWorkerSupported, serializeTensor, deserializeTensor, } from './worker.js';
 //# sourceMappingURL=index.js.map
