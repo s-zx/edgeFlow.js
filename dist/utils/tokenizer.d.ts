@@ -1,140 +1,260 @@
 /**
  * edgeFlow.js - Tokenizer
  *
- * Lightweight tokenizer implementation for text processing.
- * Supports BPE, WordPiece, and basic tokenization.
+ * Full-featured tokenizer supporting HuggingFace tokenizer.json format.
+ * Supports BPE, WordPiece, and Unigram tokenization.
  */
 import { TokenizerConfig, TokenizedOutput } from '../core/types.js';
-/**
- * Tokenizer model types
- */
-export type TokenizerModel = 'bpe' | 'wordpiece' | 'unigram' | 'basic';
-/**
- * Tokenizer options
- */
+export type TokenizerModel = 'BPE' | 'WordPiece' | 'Unigram' | 'basic';
 export interface TokenizerOptions {
-    /** Tokenizer model type */
-    model?: TokenizerModel;
-    /** Vocabulary */
-    vocab?: Map<string, number> | Record<string, number>;
-    /** Merges for BPE */
-    merges?: string[];
-    /** Add special tokens */
     addSpecialTokens?: boolean;
-    /** Maximum length */
     maxLength?: number;
-    /** Padding strategy */
     padding?: 'max_length' | 'longest' | 'do_not_pad';
-    /** Truncation */
     truncation?: boolean;
-    /** Return attention mask */
     returnAttentionMask?: boolean;
-    /** Return token type IDs */
     returnTokenTypeIds?: boolean;
+    textPair?: string;
 }
 /**
- * Tokenizer - Base class for all tokenizers
+ * HuggingFace tokenizer.json format
+ */
+interface HFTokenizerJSON {
+    version?: string;
+    truncation?: {
+        max_length: number;
+        strategy: string;
+    };
+    padding?: {
+        strategy: string;
+        pad_id: number;
+        pad_token: string;
+    };
+    added_tokens?: Array<{
+        id: number;
+        content: string;
+        single_word: boolean;
+        lstrip: boolean;
+        rstrip: boolean;
+        normalized: boolean;
+        special: boolean;
+    }>;
+    normalizer?: {
+        type: string;
+        lowercase?: boolean;
+        strip_accents?: boolean;
+        [key: string]: unknown;
+    };
+    pre_tokenizer?: {
+        type: string;
+        [key: string]: unknown;
+    };
+    post_processor?: {
+        type: string;
+        single?: Array<{
+            id: string;
+            type_id: number;
+        } | {
+            SpecialToken: {
+                id: string;
+                type_id: number;
+            };
+        } | {
+            Sequence: {
+                id: string;
+                type_id: number;
+            };
+        }>;
+        pair?: Array<{
+            id: string;
+            type_id: number;
+        } | {
+            SpecialToken: {
+                id: string;
+                type_id: number;
+            };
+        } | {
+            Sequence: {
+                id: string;
+                type_id: number;
+            };
+        }>;
+        special_tokens?: Record<string, {
+            id: string;
+            ids: number[];
+            tokens: string[];
+        }>;
+        [key: string]: unknown;
+    };
+    decoder?: {
+        type: string;
+        [key: string]: unknown;
+    };
+    model: {
+        type: string;
+        vocab?: Record<string, number>;
+        merges?: string[];
+        unk_token?: string;
+        continuing_subword_prefix?: string;
+        end_of_word_suffix?: string;
+        fuse_unk?: boolean;
+        byte_fallback?: boolean;
+        [key: string]: unknown;
+    };
+}
+/**
+ * Tokenizer - Full-featured tokenizer supporting HuggingFace format
  */
 export declare class Tokenizer {
-    protected vocab: Map<string, number>;
-    protected reverseVocab: Map<number, string>;
-    protected config: TokenizerConfig;
-    protected model: TokenizerModel;
-    protected merges: Map<string, string>;
-    constructor(config: Partial<TokenizerConfig>, options?: TokenizerOptions);
+    private vocab;
+    private reverseVocab;
+    private merges;
+    private addedTokens;
+    private specialTokens;
+    private modelType;
+    private unkToken;
+    private continuingSubwordPrefix;
+    private padTokenId;
+    private unkTokenId;
+    private clsTokenId?;
+    private sepTokenId?;
+    private maskTokenId?;
+    private bosTokenId?;
+    private eosTokenId?;
+    private maxLength;
+    private doLowerCase;
+    private stripAccents;
+    private postProcessor?;
+    private byteEncoder;
+    private byteDecoder;
+    constructor();
     /**
-     * Load vocabulary
+     * Initialize byte encoder/decoder for BPE
      */
-    protected loadVocab(vocab: Map<string, number> | Record<string, number>): void;
+    private initByteEncoder;
     /**
-     * Load BPE merges
+     * Load from HuggingFace tokenizer.json
      */
-    protected loadMerges(merges: string[]): void;
+    static fromJSON(json: HFTokenizerJSON | string): Promise<Tokenizer>;
     /**
-     * Tokenize text
+     * Load from URL (tokenizer.json)
      */
-    encode(text: string, options?: {
-        addSpecialTokens?: boolean;
-        maxLength?: number;
-        padding?: 'max_length' | 'longest' | 'do_not_pad';
-        truncation?: boolean;
-        returnAttentionMask?: boolean;
-        returnTokenTypeIds?: boolean;
-    }): TokenizedOutput;
+    static fromUrl(url: string): Promise<Tokenizer>;
     /**
-     * Batch encode
+     * Load from HuggingFace Hub
      */
-    encodeBatch(texts: string[], options?: {
-        addSpecialTokens?: boolean;
-        maxLength?: number;
-        padding?: 'max_length' | 'longest' | 'do_not_pad';
-        truncation?: boolean;
-        returnAttentionMask?: boolean;
-        returnTokenTypeIds?: boolean;
-    }): TokenizedOutput[];
-    /**
-     * Decode token IDs back to text
-     */
-    decode(ids: number[], skipSpecialTokens?: boolean): string;
-    /**
-     * Basic tokenization (split by whitespace and punctuation)
-     */
-    protected tokenize(text: string): string[];
+    static fromHuggingFace(modelId: string, options?: {
+        revision?: string;
+    }): Promise<Tokenizer>;
     /**
      * Normalize text
      */
-    protected normalize(text: string): string;
+    private normalize;
     /**
-     * Basic tokenization
+     * Pre-tokenize text (split into words)
      */
-    protected tokenizeBasic(text: string): string[];
+    private preTokenize;
+    /**
+     * Encode text to bytes (for BPE)
+     */
+    private textToBytes;
+    /**
+     * Decode bytes to text (for BPE)
+     */
+    private bytesToText;
+    /**
+     * Get BPE pairs from word
+     */
+    private getPairs;
+    /**
+     * Apply BPE to a word
+     */
+    private bpe;
     /**
      * WordPiece tokenization
      */
-    protected tokenizeWordPiece(text: string): string[];
+    private wordPiece;
     /**
-     * Tokenize a single word using WordPiece
+     * Tokenize a single word
      */
-    protected tokenizeWord(word: string): string[];
+    private tokenizeWord;
     /**
-     * BPE tokenization
+     * Main tokenization
      */
-    protected tokenizeBPE(text: string): string[];
-    /**
-     * Add special tokens
-     */
-    protected addSpecialTokens(tokens: string[]): string[];
+    private tokenize;
     /**
      * Convert tokens to IDs
      */
-    protected convertTokensToIds(tokens: string[]): number[];
+    private convertTokensToIds;
     /**
      * Convert IDs to tokens
      */
-    protected convertIdsToTokens(ids: number[]): string[];
+    private convertIdsToTokens;
     /**
-     * Check if token is a special token
+     * Apply post-processing (add special tokens)
      */
-    protected isSpecialToken(token: string): boolean;
+    private postProcess;
     /**
-     * Detokenize (convert tokens back to text)
+     * Encode text
      */
-    protected detokenize(tokens: string[]): string;
+    encode(text: string, options?: TokenizerOptions): TokenizedOutput;
+    /**
+     * Batch encode
+     */
+    encodeBatch(texts: string[], options?: TokenizerOptions): TokenizedOutput[];
+    /**
+     * Decode IDs to text
+     */
+    decode(ids: number[], skipSpecialTokens?: boolean): string;
+    /**
+     * Decode batch
+     */
+    decodeBatch(batchIds: number[][], skipSpecialTokens?: boolean): string[];
     /**
      * Get vocabulary size
      */
     get vocabSize(): number;
     /**
+     * Get special token IDs
+     */
+    getSpecialTokenIds(): {
+        padTokenId: number;
+        unkTokenId: number;
+        clsTokenId?: number;
+        sepTokenId?: number;
+        maskTokenId?: number;
+        bosTokenId?: number;
+        eosTokenId?: number;
+    };
+    /**
      * Get config
      */
     getConfig(): TokenizerConfig;
+    /**
+     * Check if token is special
+     */
+    isSpecialToken(token: string): boolean;
+    /**
+     * Get token ID
+     */
+    getTokenId(token: string): number | undefined;
+    /**
+     * Get token from ID
+     */
+    getToken(id: number): string | undefined;
 }
 /**
- * Create a basic English tokenizer
+ * Create a basic English tokenizer (for testing)
  */
 export declare function createBasicTokenizer(): Tokenizer;
 /**
  * Load tokenizer from URL
  */
 export declare function loadTokenizer(url: string): Promise<Tokenizer>;
+/**
+ * Load tokenizer from HuggingFace Hub
+ */
+export declare function loadTokenizerFromHub(modelId: string, options?: {
+    revision?: string;
+}): Promise<Tokenizer>;
+export {};
 //# sourceMappingURL=tokenizer.d.ts.map

@@ -1,185 +1,268 @@
 /**
  * edgeFlow.js - Tokenizer
  *
- * Lightweight tokenizer implementation for text processing.
- * Supports BPE, WordPiece, and basic tokenization.
+ * Full-featured tokenizer supporting HuggingFace tokenizer.json format.
+ * Supports BPE, WordPiece, and Unigram tokenization.
  */
 import { EdgeFlowError, ErrorCodes, } from '../core/types.js';
 // ============================================================================
-// Base Tokenizer
+// Tokenizer Implementation
 // ============================================================================
 /**
- * Tokenizer - Base class for all tokenizers
+ * Tokenizer - Full-featured tokenizer supporting HuggingFace format
  */
 export class Tokenizer {
-    vocab;
-    reverseVocab;
-    config;
-    model;
+    vocab = new Map();
+    reverseVocab = new Map();
     merges = new Map();
-    constructor(config, options = {}) {
-        this.config = {
-            vocabSize: config.vocabSize ?? 30522,
-            maxLength: config.maxLength ?? 512,
-            padTokenId: config.padTokenId ?? 0,
-            unkTokenId: config.unkTokenId ?? 100,
-            bosTokenId: config.bosTokenId,
-            eosTokenId: config.eosTokenId,
-            sepTokenId: config.sepTokenId ?? 102,
-            clsTokenId: config.clsTokenId ?? 101,
-            maskTokenId: config.maskTokenId ?? 103,
-        };
-        this.model = options.model ?? 'basic';
-        this.vocab = new Map();
-        this.reverseVocab = new Map();
-        // Load vocabulary
-        if (options.vocab) {
-            this.loadVocab(options.vocab);
-        }
-        // Load merges for BPE
-        if (options.merges) {
-            this.loadMerges(options.merges);
-        }
+    addedTokens = new Map();
+    specialTokens = new Set();
+    modelType = 'BPE';
+    unkToken = '[UNK]';
+    continuingSubwordPrefix = '##';
+    // Special token IDs
+    padTokenId = 0;
+    unkTokenId = 0;
+    clsTokenId;
+    sepTokenId;
+    maskTokenId;
+    bosTokenId;
+    eosTokenId;
+    // Config
+    maxLength = 512;
+    doLowerCase = false;
+    stripAccents = false;
+    // Post-processor config
+    postProcessor;
+    // Byte encoder for BPE
+    byteEncoder = new Map();
+    byteDecoder = new Map();
+    constructor() {
+        this.initByteEncoder();
     }
     /**
-     * Load vocabulary
+     * Initialize byte encoder/decoder for BPE
      */
-    loadVocab(vocab) {
-        if (vocab instanceof Map) {
-            this.vocab = new Map(vocab);
-        }
-        else {
-            this.vocab = new Map(Object.entries(vocab));
-        }
-        // Build reverse vocab
-        for (const [token, id] of this.vocab) {
-            this.reverseVocab.set(id, token);
-        }
-    }
-    /**
-     * Load BPE merges
-     */
-    loadMerges(merges) {
-        for (const merge of merges) {
-            const [a, b] = merge.split(' ');
-            if (a && b) {
-                this.merges.set(`${a} ${b}`, `${a}${b}`);
+    initByteEncoder() {
+        const bytes = [];
+        // Printable ASCII
+        for (let i = 33; i <= 126; i++)
+            bytes.push(i);
+        for (let i = 161; i <= 172; i++)
+            bytes.push(i);
+        for (let i = 174; i <= 255; i++)
+            bytes.push(i);
+        const chars = [...bytes];
+        let n = 0;
+        for (let i = 0; i < 256; i++) {
+            if (!bytes.includes(i)) {
+                bytes.push(i);
+                chars.push(256 + n);
+                n++;
             }
         }
+        for (let i = 0; i < bytes.length; i++) {
+            const byte = bytes[i];
+            const char = String.fromCharCode(chars[i]);
+            this.byteEncoder.set(byte, char);
+            this.byteDecoder.set(char, byte);
+        }
     }
     /**
-     * Tokenize text
+     * Load from HuggingFace tokenizer.json
      */
-    encode(text, options = {}) {
-        const { addSpecialTokens = true, maxLength = this.config.maxLength, padding = 'max_length', truncation = true, returnAttentionMask = true, returnTokenTypeIds = false, } = options;
-        // Tokenize
-        let tokens = this.tokenize(text);
-        // Add special tokens
-        if (addSpecialTokens) {
-            tokens = this.addSpecialTokens(tokens);
+    static async fromJSON(json) {
+        const tokenizer = new Tokenizer();
+        const data = typeof json === 'string' ? JSON.parse(json) : json;
+        // Load model config
+        if (data.model) {
+            tokenizer.modelType = data.model.type;
+            // Load vocabulary
+            if (data.model.vocab) {
+                for (const [token, id] of Object.entries(data.model.vocab)) {
+                    tokenizer.vocab.set(token, id);
+                    tokenizer.reverseVocab.set(id, token);
+                }
+            }
+            // Load merges for BPE
+            if (data.model.merges) {
+                for (let i = 0; i < data.model.merges.length; i++) {
+                    tokenizer.merges.set(data.model.merges[i], i);
+                }
+            }
+            // Model-specific config
+            tokenizer.unkToken = data.model.unk_token ?? '[UNK]';
+            tokenizer.continuingSubwordPrefix = data.model.continuing_subword_prefix ?? '##';
         }
-        // Convert to IDs
-        let inputIds = this.convertTokensToIds(tokens);
-        // Truncate if needed
-        if (truncation && inputIds.length > maxLength) {
-            inputIds = inputIds.slice(0, maxLength);
-            // Ensure EOS token if present
-            if (addSpecialTokens && this.config.sepTokenId !== undefined) {
-                inputIds[inputIds.length - 1] = this.config.sepTokenId;
+        // Load added tokens
+        if (data.added_tokens) {
+            for (const token of data.added_tokens) {
+                tokenizer.addedTokens.set(token.content, token.id);
+                tokenizer.reverseVocab.set(token.id, token.content);
+                if (token.special) {
+                    tokenizer.specialTokens.add(token.content);
+                }
+                // Detect special token types
+                const content = token.content.toLowerCase();
+                if (content.includes('pad'))
+                    tokenizer.padTokenId = token.id;
+                if (content.includes('unk'))
+                    tokenizer.unkTokenId = token.id;
+                if (content.includes('cls') || content === '[cls]')
+                    tokenizer.clsTokenId = token.id;
+                if (content.includes('sep') || content === '[sep]')
+                    tokenizer.sepTokenId = token.id;
+                if (content.includes('mask'))
+                    tokenizer.maskTokenId = token.id;
+                if (content.includes('bos') || content === '<s>')
+                    tokenizer.bosTokenId = token.id;
+                if (content.includes('eos') || content === '</s>')
+                    tokenizer.eosTokenId = token.id;
             }
         }
-        // Create attention mask
-        const attentionMask = returnAttentionMask
-            ? inputIds.map(() => 1)
-            : [];
-        // Pad if needed
-        if (padding === 'max_length' && inputIds.length < maxLength) {
-            const padLength = maxLength - inputIds.length;
-            inputIds = [...inputIds, ...new Array(padLength).fill(this.config.padTokenId)];
-            if (returnAttentionMask) {
-                attentionMask.push(...new Array(padLength).fill(0));
-            }
+        // Load normalizer config
+        if (data.normalizer) {
+            tokenizer.doLowerCase = data.normalizer.lowercase ?? false;
+            tokenizer.stripAccents = data.normalizer.strip_accents ?? false;
         }
-        const result = {
-            inputIds,
-            attentionMask,
-        };
-        // Token type IDs (for segment embeddings)
-        if (returnTokenTypeIds) {
-            result.tokenTypeIds = inputIds.map(() => 0);
+        // Load truncation config
+        if (data.truncation) {
+            tokenizer.maxLength = data.truncation.max_length;
         }
-        return result;
+        // Load post-processor
+        if (data.post_processor) {
+            tokenizer.postProcessor = data.post_processor;
+        }
+        return tokenizer;
     }
     /**
-     * Batch encode
+     * Load from URL (tokenizer.json)
      */
-    encodeBatch(texts, options = {}) {
-        // Determine max length for 'longest' padding
-        let maxLen = options.maxLength ?? this.config.maxLength;
-        if (options.padding === 'longest') {
-            const encodings = texts.map(text => this.encode(text, { ...options, padding: 'do_not_pad' }));
-            maxLen = Math.max(...encodings.map(e => e.inputIds.length));
+    static async fromUrl(url) {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new EdgeFlowError(`Failed to load tokenizer from ${url}: ${response.status}`, ErrorCodes.MODEL_NOT_FOUND);
         }
-        return texts.map(text => this.encode(text, { ...options, maxLength: maxLen }));
+        const json = await response.json();
+        return Tokenizer.fromJSON(json);
     }
     /**
-     * Decode token IDs back to text
+     * Load from HuggingFace Hub
      */
-    decode(ids, skipSpecialTokens = true) {
-        const tokens = this.convertIdsToTokens(ids);
-        // Filter special tokens if requested
-        const filteredTokens = skipSpecialTokens
-            ? tokens.filter(token => !this.isSpecialToken(token))
-            : tokens;
-        return this.detokenize(filteredTokens);
-    }
-    /**
-     * Basic tokenization (split by whitespace and punctuation)
-     */
-    tokenize(text) {
-        // Normalize text
-        const normalized = this.normalize(text);
-        switch (this.model) {
-            case 'bpe':
-                return this.tokenizeBPE(normalized);
-            case 'wordpiece':
-                return this.tokenizeWordPiece(normalized);
-            default:
-                return this.tokenizeBasic(normalized);
-        }
+    static async fromHuggingFace(modelId, options) {
+        const revision = options?.revision ?? 'main';
+        const url = `https://huggingface.co/${modelId}/resolve/${revision}/tokenizer.json`;
+        return Tokenizer.fromUrl(url);
     }
     /**
      * Normalize text
      */
     normalize(text) {
-        return text
-            .toLowerCase()
-            .replace(/[^\w\s'-]/g, ' $& ')
-            .replace(/\s+/g, ' ')
-            .trim();
+        let result = text;
+        if (this.doLowerCase) {
+            result = result.toLowerCase();
+        }
+        if (this.stripAccents) {
+            result = result.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        }
+        // Normalize whitespace
+        result = result.replace(/\s+/g, ' ').trim();
+        return result;
     }
     /**
-     * Basic tokenization
+     * Pre-tokenize text (split into words)
      */
-    tokenizeBasic(text) {
-        return text.split(/\s+/).filter(t => t.length > 0);
+    preTokenize(text) {
+        // GPT-2 style: split on whitespace and punctuation, keeping them
+        const pattern = /'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+/gu;
+        const matches = text.match(pattern);
+        return matches ?? [text];
+    }
+    /**
+     * Encode text to bytes (for BPE)
+     */
+    textToBytes(text) {
+        const encoder = new TextEncoder();
+        const bytes = encoder.encode(text);
+        return Array.from(bytes).map(b => this.byteEncoder.get(b) ?? '').join('');
+    }
+    /**
+     * Decode bytes to text (for BPE)
+     */
+    bytesToText(text) {
+        const bytes = new Uint8Array(text.split('').map(c => this.byteDecoder.get(c) ?? 0));
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        return decoder.decode(bytes);
+    }
+    /**
+     * Get BPE pairs from word
+     */
+    getPairs(word) {
+        const pairs = new Set();
+        for (let i = 0; i < word.length - 1; i++) {
+            pairs.add(`${word[i]} ${word[i + 1]}`);
+        }
+        return pairs;
+    }
+    /**
+     * Apply BPE to a word
+     */
+    bpe(token) {
+        if (this.vocab.has(token)) {
+            return [token];
+        }
+        let word = token.split('');
+        let pairs = this.getPairs(word);
+        if (pairs.size === 0) {
+            return [token];
+        }
+        while (true) {
+            // Find the pair with lowest merge rank
+            let minPair = null;
+            let minRank = Infinity;
+            for (const pair of pairs) {
+                const rank = this.merges.get(pair);
+                if (rank !== undefined && rank < minRank) {
+                    minRank = rank;
+                    minPair = pair;
+                }
+            }
+            if (minPair === null)
+                break;
+            const parts = minPair.split(' ');
+            const first = parts[0];
+            const second = parts[1];
+            if (!first || !second)
+                break;
+            const newWord = [];
+            let i = 0;
+            while (i < word.length) {
+                const j = word.indexOf(first, i);
+                if (j === -1) {
+                    newWord.push(...word.slice(i));
+                    break;
+                }
+                newWord.push(...word.slice(i, j));
+                if (word[j] === first && j < word.length - 1 && word[j + 1] === second) {
+                    newWord.push(first + second);
+                    i = j + 2;
+                }
+                else {
+                    newWord.push(word[j]);
+                    i = j + 1;
+                }
+            }
+            word = newWord;
+            if (word.length === 1)
+                break;
+            pairs = this.getPairs(word);
+        }
+        return word;
     }
     /**
      * WordPiece tokenization
      */
-    tokenizeWordPiece(text) {
-        const words = text.split(/\s+/).filter(w => w.length > 0);
-        const tokens = [];
-        for (const word of words) {
-            const wordTokens = this.tokenizeWord(word);
-            tokens.push(...wordTokens);
-        }
-        return tokens;
-    }
-    /**
-     * Tokenize a single word using WordPiece
-     */
-    tokenizeWord(word) {
+    wordPiece(word) {
         if (this.vocab.has(word)) {
             return [word];
         }
@@ -187,211 +270,340 @@ export class Tokenizer {
         let start = 0;
         while (start < word.length) {
             let end = word.length;
-            let found = false;
+            let curSubstr = null;
             while (start < end) {
-                const substr = start === 0 ? word.slice(start, end) : `##${word.slice(start, end)}`;
+                let substr = word.slice(start, end);
+                if (start > 0) {
+                    substr = this.continuingSubwordPrefix + substr;
+                }
                 if (this.vocab.has(substr)) {
-                    tokens.push(substr);
-                    found = true;
+                    curSubstr = substr;
                     break;
                 }
                 end--;
             }
-            if (!found) {
-                // Unknown character
-                tokens.push('[UNK]');
+            if (curSubstr === null) {
+                tokens.push(this.unkToken);
                 start++;
             }
             else {
+                tokens.push(curSubstr);
                 start = end;
             }
         }
         return tokens;
     }
     /**
-     * BPE tokenization
+     * Tokenize a single word
      */
-    tokenizeBPE(text) {
-        const words = text.split(/\s+/).filter(w => w.length > 0);
-        const tokens = [];
-        for (const word of words) {
-            // Split word into characters
-            let chars = word.split('').map((c, i) => i === word.length - 1 ? c + '</w>' : c);
-            // Apply merges iteratively
-            while (chars.length > 1) {
-                let minPair = null;
-                let minScore = Infinity;
-                for (let i = 0; i < chars.length - 1; i++) {
-                    const pair = `${chars[i]} ${chars[i + 1]}`;
-                    if (this.merges.has(pair)) {
-                        const score = Array.from(this.merges.keys()).indexOf(pair);
-                        if (score < minScore) {
-                            minScore = score;
-                            minPair = [i, pair];
-                        }
-                    }
-                }
-                if (!minPair)
-                    break;
-                const [idx, pair] = minPair;
-                const merged = this.merges.get(pair);
-                chars = [
-                    ...chars.slice(0, idx),
-                    merged,
-                    ...chars.slice(idx + 2),
-                ];
-            }
-            tokens.push(...chars);
+    tokenizeWord(word) {
+        // Check added tokens first
+        if (this.addedTokens.has(word)) {
+            return [word];
         }
-        return tokens;
+        switch (this.modelType) {
+            case 'BPE': {
+                // Convert to byte representation
+                const byteStr = this.textToBytes(word);
+                return this.bpe(byteStr);
+            }
+            case 'WordPiece':
+                return this.wordPiece(word);
+            default:
+                return this.vocab.has(word) ? [word] : [this.unkToken];
+        }
     }
     /**
-     * Add special tokens
+     * Main tokenization
      */
-    addSpecialTokens(tokens) {
-        const result = [];
-        // Add CLS token
-        if (this.config.clsTokenId !== undefined) {
-            result.push('[CLS]');
+    tokenize(text) {
+        // Normalize
+        const normalized = this.normalize(text);
+        // Check for added tokens (special tokens)
+        const tokens = [];
+        let remaining = normalized;
+        // Sort added tokens by length (longest first) for greedy matching
+        const sortedAddedTokens = Array.from(this.addedTokens.keys())
+            .sort((a, b) => b.length - a.length);
+        // Split by added tokens
+        for (const addedToken of sortedAddedTokens) {
+            if (remaining.includes(addedToken)) {
+                const parts = remaining.split(addedToken);
+                const newRemaining = [];
+                for (let i = 0; i < parts.length; i++) {
+                    if (parts[i]) {
+                        newRemaining.push(parts[i]);
+                    }
+                    if (i < parts.length - 1) {
+                        tokens.push(addedToken);
+                    }
+                }
+                remaining = newRemaining.join(' ');
+            }
         }
-        result.push(...tokens);
-        // Add SEP token
-        if (this.config.sepTokenId !== undefined) {
-            result.push('[SEP]');
+        // Pre-tokenize remaining text
+        if (remaining.trim()) {
+            const words = this.preTokenize(remaining);
+            for (const word of words) {
+                if (!word)
+                    continue;
+                const wordTokens = this.tokenizeWord(word);
+                tokens.push(...wordTokens);
+            }
         }
-        return result;
+        return tokens;
     }
     /**
      * Convert tokens to IDs
      */
     convertTokensToIds(tokens) {
         return tokens.map(token => {
-            const id = this.vocab.get(token);
-            if (id !== undefined)
-                return id;
-            // Handle special tokens
-            if (token === '[CLS]')
-                return this.config.clsTokenId ?? this.config.unkTokenId;
-            if (token === '[SEP]')
-                return this.config.sepTokenId ?? this.config.unkTokenId;
-            if (token === '[PAD]')
-                return this.config.padTokenId;
-            if (token === '[MASK]')
-                return this.config.maskTokenId ?? this.config.unkTokenId;
-            if (token === '[UNK]')
-                return this.config.unkTokenId;
-            return this.config.unkTokenId;
+            // Check added tokens first
+            const addedId = this.addedTokens.get(token);
+            if (addedId !== undefined)
+                return addedId;
+            // Check vocabulary
+            const vocabId = this.vocab.get(token);
+            if (vocabId !== undefined)
+                return vocabId;
+            // Return UNK
+            return this.unkTokenId;
         });
     }
     /**
      * Convert IDs to tokens
      */
     convertIdsToTokens(ids) {
-        return ids.map(id => {
-            const token = this.reverseVocab.get(id);
-            if (token !== undefined)
-                return token;
-            // Handle special token IDs
-            if (id === this.config.clsTokenId)
-                return '[CLS]';
-            if (id === this.config.sepTokenId)
-                return '[SEP]';
-            if (id === this.config.padTokenId)
-                return '[PAD]';
-            if (id === this.config.maskTokenId)
-                return '[MASK]';
-            if (id === this.config.unkTokenId)
-                return '[UNK]';
-            return '[UNK]';
-        });
+        return ids.map(id => this.reverseVocab.get(id) ?? this.unkToken);
     }
     /**
-     * Check if token is a special token
+     * Apply post-processing (add special tokens)
      */
-    isSpecialToken(token) {
-        return ['[CLS]', '[SEP]', '[PAD]', '[MASK]', '[UNK]'].includes(token);
+    postProcess(ids, pairIds) {
+        if (!this.postProcessor) {
+            // Default: [CLS] tokens [SEP] or [CLS] tokens [SEP] pair [SEP]
+            const result = [];
+            const typeIds = [];
+            if (this.clsTokenId !== undefined) {
+                result.push(this.clsTokenId);
+                typeIds.push(0);
+            }
+            result.push(...ids);
+            typeIds.push(...ids.map(() => 0));
+            if (this.sepTokenId !== undefined) {
+                result.push(this.sepTokenId);
+                typeIds.push(0);
+            }
+            if (pairIds) {
+                result.push(...pairIds);
+                typeIds.push(...pairIds.map(() => 1));
+                if (this.sepTokenId !== undefined) {
+                    result.push(this.sepTokenId);
+                    typeIds.push(1);
+                }
+            }
+            return { ids: result, typeIds };
+        }
+        // Use post-processor config
+        const template = pairIds ? this.postProcessor.pair : this.postProcessor.single;
+        if (!template) {
+            return { ids, typeIds: ids.map(() => 0) };
+        }
+        const result = [];
+        const typeIds = [];
+        for (const item of template) {
+            if ('SpecialToken' in item) {
+                const specialToken = this.postProcessor.special_tokens?.[item.SpecialToken.id];
+                if (specialToken) {
+                    result.push(...specialToken.ids);
+                    typeIds.push(...specialToken.ids.map(() => item.SpecialToken.type_id));
+                }
+            }
+            else if ('Sequence' in item) {
+                const seqIds = item.Sequence.id === 'A' ? ids : pairIds ?? [];
+                result.push(...seqIds);
+                typeIds.push(...seqIds.map(() => item.Sequence.type_id));
+            }
+        }
+        return { ids: result, typeIds };
     }
     /**
-     * Detokenize (convert tokens back to text)
+     * Encode text
      */
-    detokenize(tokens) {
-        // Handle WordPiece
-        const text = tokens
-            .join(' ')
-            .replace(/ ##/g, '')
-            .replace(/<\/w>/g, ' ')
-            .trim();
+    encode(text, options = {}) {
+        const { addSpecialTokens = true, maxLength = this.maxLength, padding = 'max_length', truncation = true, returnAttentionMask = true, returnTokenTypeIds = false, textPair, } = options;
+        // Tokenize
+        const tokens = this.tokenize(text);
+        let inputIds = this.convertTokensToIds(tokens);
+        // Tokenize pair if provided
+        let pairIds;
+        if (textPair) {
+            const pairTokens = this.tokenize(textPair);
+            pairIds = this.convertTokensToIds(pairTokens);
+        }
+        // Post-process (add special tokens)
+        let tokenTypeIds;
+        if (addSpecialTokens) {
+            const processed = this.postProcess(inputIds, pairIds);
+            inputIds = processed.ids;
+            if (returnTokenTypeIds) {
+                tokenTypeIds = processed.typeIds;
+            }
+        }
+        else if (pairIds) {
+            inputIds = [...inputIds, ...pairIds];
+            if (returnTokenTypeIds) {
+                tokenTypeIds = [...inputIds.map(() => 0), ...pairIds.map(() => 1)];
+            }
+        }
+        // Truncate
+        if (truncation && inputIds.length > maxLength) {
+            inputIds = inputIds.slice(0, maxLength);
+            if (tokenTypeIds) {
+                tokenTypeIds = tokenTypeIds.slice(0, maxLength);
+            }
+        }
+        // Create attention mask
+        let attentionMask = [];
+        if (returnAttentionMask) {
+            attentionMask = inputIds.map(() => 1);
+        }
+        // Padding
+        if (padding === 'max_length' && inputIds.length < maxLength) {
+            const padLength = maxLength - inputIds.length;
+            inputIds = [...inputIds, ...new Array(padLength).fill(this.padTokenId)];
+            if (returnAttentionMask) {
+                attentionMask = [...attentionMask, ...new Array(padLength).fill(0)];
+            }
+            if (tokenTypeIds) {
+                tokenTypeIds = [...tokenTypeIds, ...new Array(padLength).fill(0)];
+            }
+        }
+        const result = {
+            inputIds,
+            attentionMask,
+        };
+        if (returnTokenTypeIds && tokenTypeIds) {
+            result.tokenTypeIds = tokenTypeIds;
+        }
+        return result;
+    }
+    /**
+     * Batch encode
+     */
+    encodeBatch(texts, options = {}) {
+        // For 'longest' padding, first encode all without padding
+        if (options.padding === 'longest') {
+            const encodings = texts.map(t => this.encode(t, { ...options, padding: 'do_not_pad' }));
+            const maxLen = Math.max(...encodings.map(e => e.inputIds.length));
+            return texts.map(t => this.encode(t, { ...options, maxLength: maxLen, padding: 'max_length' }));
+        }
+        return texts.map(t => this.encode(t, options));
+    }
+    /**
+     * Decode IDs to text
+     */
+    decode(ids, skipSpecialTokens = true) {
+        let tokens = this.convertIdsToTokens(ids);
+        // Filter special tokens
+        if (skipSpecialTokens) {
+            tokens = tokens.filter(t => !this.specialTokens.has(t));
+        }
+        // Join tokens
+        let text = tokens.join('');
+        // For BPE, decode bytes
+        if (this.modelType === 'BPE') {
+            text = this.bytesToText(text);
+        }
+        // For WordPiece, handle ## prefix
+        if (this.modelType === 'WordPiece') {
+            text = text.replace(new RegExp(this.continuingSubwordPrefix, 'g'), '');
+        }
+        // Clean up whitespace
+        text = text.replace(/\s+/g, ' ').trim();
         return text;
+    }
+    /**
+     * Decode batch
+     */
+    decodeBatch(batchIds, skipSpecialTokens = true) {
+        return batchIds.map(ids => this.decode(ids, skipSpecialTokens));
     }
     /**
      * Get vocabulary size
      */
     get vocabSize() {
-        return this.vocab.size;
+        return this.vocab.size + this.addedTokens.size;
+    }
+    /**
+     * Get special token IDs
+     */
+    getSpecialTokenIds() {
+        return {
+            padTokenId: this.padTokenId,
+            unkTokenId: this.unkTokenId,
+            clsTokenId: this.clsTokenId,
+            sepTokenId: this.sepTokenId,
+            maskTokenId: this.maskTokenId,
+            bosTokenId: this.bosTokenId,
+            eosTokenId: this.eosTokenId,
+        };
     }
     /**
      * Get config
      */
     getConfig() {
-        return { ...this.config };
+        return {
+            vocabSize: this.vocabSize,
+            maxLength: this.maxLength,
+            padTokenId: this.padTokenId,
+            unkTokenId: this.unkTokenId,
+            clsTokenId: this.clsTokenId,
+            sepTokenId: this.sepTokenId,
+            maskTokenId: this.maskTokenId,
+            bosTokenId: this.bosTokenId,
+            eosTokenId: this.eosTokenId,
+        };
+    }
+    /**
+     * Check if token is special
+     */
+    isSpecialToken(token) {
+        return this.specialTokens.has(token);
+    }
+    /**
+     * Get token ID
+     */
+    getTokenId(token) {
+        return this.addedTokens.get(token) ?? this.vocab.get(token);
+    }
+    /**
+     * Get token from ID
+     */
+    getToken(id) {
+        return this.reverseVocab.get(id);
     }
 }
 // ============================================================================
-// Pre-trained Tokenizers
+// Factory Functions
 // ============================================================================
 /**
- * Create a basic English tokenizer
+ * Create a basic English tokenizer (for testing)
  */
 export function createBasicTokenizer() {
-    // Create basic vocabulary
-    const vocab = {
-        '[PAD]': 0,
-        '[UNK]': 1,
-        '[CLS]': 2,
-        '[SEP]': 3,
-        '[MASK]': 4,
-    };
-    // Add common words
-    const commonWords = [
-        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
-        'may', 'might', 'must', 'shall', 'can', 'need', 'dare', 'ought', 'used',
-        'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
-        'my', 'your', 'his', 'its', 'our', 'their', 'mine', 'yours', 'hers', 'ours', 'theirs',
-        'this', 'that', 'these', 'those', 'what', 'which', 'who', 'whom', 'whose',
-        'and', 'but', 'or', 'nor', 'for', 'yet', 'so', 'as', 'if', 'when', 'while',
-        'not', 'no', 'yes', 'all', 'any', 'both', 'each', 'every', 'few', 'more', 'most',
-        'other', 'some', 'such', 'only', 'own', 'same', 'than', 'too', 'very',
-        'good', 'bad', 'great', 'new', 'old', 'high', 'low', 'big', 'small', 'long', 'short',
-        'love', 'like', 'hate', 'want', 'need', 'think', 'know', 'feel', 'see', 'hear',
-    ];
-    let id = 5;
-    for (const word of commonWords) {
-        vocab[word] = id++;
-    }
-    return new Tokenizer({
-        vocabSize: id,
-        maxLength: 128,
-        padTokenId: 0,
-        unkTokenId: 1,
-        clsTokenId: 2,
-        sepTokenId: 3,
-        maskTokenId: 4,
-    }, { vocab, model: 'basic' });
+    const tokenizer = new Tokenizer();
+    return tokenizer;
 }
 /**
  * Load tokenizer from URL
  */
 export async function loadTokenizer(url) {
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new EdgeFlowError(`Failed to load tokenizer from ${url}`, ErrorCodes.MODEL_NOT_FOUND);
-    }
-    const data = await response.json();
-    return new Tokenizer(data.config ?? {}, {
-        vocab: data.vocab,
-        merges: data.merges,
-        model: data.model,
-    });
+    return Tokenizer.fromUrl(url);
+}
+/**
+ * Load tokenizer from HuggingFace Hub
+ */
+export async function loadTokenizerFromHub(modelId, options) {
+    return Tokenizer.fromHuggingFace(modelId, options);
 }
 //# sourceMappingURL=tokenizer.js.map
