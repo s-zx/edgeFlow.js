@@ -3295,50 +3295,8 @@ function createWASMRuntime() {
 
 // dist/backends/onnx.js
 init_types();
+import * as ort from "onnxruntime-web";
 init_tensor();
-var ONNX_VERSION = "1.17.0";
-var ONNX_CDN_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNX_VERSION}/dist/`;
-var ONNX_SCRIPT_URL = `${ONNX_CDN_BASE}ort.min.js`;
-var ort = null;
-var ortLoadPromise = null;
-async function loadONNXRuntime() {
-  if (ort)
-    return ort;
-  if (ortLoadPromise)
-    return ortLoadPromise;
-  ortLoadPromise = new Promise((resolve, reject) => {
-    if (typeof window !== "undefined" && window.ort) {
-      ort = window.ort;
-      ort.env.wasm.wasmPaths = ONNX_CDN_BASE;
-      resolve(ort);
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = ONNX_SCRIPT_URL;
-    script.async = true;
-    script.onload = () => {
-      if (window.ort) {
-        ort = window.ort;
-        ort.env.wasm.wasmPaths = ONNX_CDN_BASE;
-        console.log(`\u2713 ONNX Runtime v${ONNX_VERSION} loaded from CDN`);
-        resolve(ort);
-      } else {
-        reject(new Error("ONNX Runtime loaded but ort global not found"));
-      }
-    };
-    script.onerror = () => {
-      reject(new Error(`Failed to load ONNX Runtime from ${ONNX_SCRIPT_URL}`));
-    };
-    document.head.appendChild(script);
-  });
-  return ortLoadPromise;
-}
-async function getOrt() {
-  if (!ort) {
-    ort = await loadONNXRuntime();
-  }
-  return ort;
-}
 var sessionStore = /* @__PURE__ */ new Map();
 var ONNXRuntime = class {
   constructor() {
@@ -3359,19 +3317,17 @@ var ONNXRuntime = class {
     };
   }
   /**
-   * Check if ONNX Runtime is available (always true - will be loaded from CDN)
+   * Check if ONNX Runtime is available
    */
   async isAvailable() {
     return true;
   }
   /**
-   * Initialize the ONNX runtime (loads from CDN if needed)
+   * Initialize the ONNX runtime
    */
   async initialize() {
     if (this.initialized)
       return;
-    const ortInstance = await getOrt();
-    ortInstance.env.wasm.wasmPaths = ONNX_CDN_BASE;
     this.executionProvider = "wasm";
     this.initialized = true;
   }
@@ -3382,14 +3338,13 @@ var ONNXRuntime = class {
     if (!this.initialized) {
       await this.initialize();
     }
-    const ortInstance = await getOrt();
     try {
       const sessionOptions = {
         executionProviders: [this.executionProvider],
         graphOptimizationLevel: "all"
       };
       const modelBytes = new Uint8Array(modelData);
-      const session = await ortInstance.InferenceSession.create(modelBytes, sessionOptions);
+      const session = await ort.InferenceSession.create(modelBytes, sessionOptions);
       const inputNames = session.inputNames;
       const outputNames = session.outputNames;
       const modelId = `onnx_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -3432,7 +3387,6 @@ var ONNXRuntime = class {
     if (!sessionData) {
       throw new EdgeFlowError(`ONNX session not found for model ${model.id}`, ErrorCodes.MODEL_NOT_LOADED, { modelId: model.id });
     }
-    const ortInstance = await getOrt();
     const { session, inputNames, outputNames } = sessionData;
     try {
       const feeds = {};
@@ -3444,13 +3398,13 @@ var ONNXRuntime = class {
           let ortTensor;
           if (dtype === "int64") {
             const data = inputTensor.data;
-            ortTensor = new ortInstance.Tensor("int64", data, inputTensor.shape);
+            ortTensor = new ort.Tensor("int64", data, inputTensor.shape);
           } else if (dtype === "int32") {
             const data = inputTensor.data;
-            ortTensor = new ortInstance.Tensor("int32", data, inputTensor.shape);
+            ortTensor = new ort.Tensor("int32", data, inputTensor.shape);
           } else {
             const data = inputTensor.toFloat32Array();
-            ortTensor = new ortInstance.Tensor("float32", data, inputTensor.shape);
+            ortTensor = new ort.Tensor("float32", data, inputTensor.shape);
           }
           feeds[inputName] = ortTensor;
         }

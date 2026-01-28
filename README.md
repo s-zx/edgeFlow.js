@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Lightweight, high-performance browser ML inference framework.**
+**Browser ML inference framework with task scheduling and smart caching.**
 
 [![npm version](https://img.shields.io/npm/v/edgeflowjs.svg)](https://www.npmjs.com/package/edgeflowjs)
 [![install size](https://packagephobia.com/badge?p=edgeflowjs)](https://packagephobia.com/result?p=edgeflowjs)
@@ -16,32 +16,33 @@
 
 ## ✨ Features
 
-- 🚀 **Native Concurrency** - Run multiple models in parallel, no more serial execution bottleneck
-- 📦 **Lightweight** - Core bundle < 500KB, zero runtime dependencies
-- 🔄 **Native Batch Processing** - Efficient batch inference out of the box
-- 💾 **Smart Memory Management** - Automatic memory tracking and cleanup
-- 🎯 **Developer Friendly** - Full TypeScript support with intuitive APIs
-- 🔌 **Modular Architecture** - Import only what you need
-- 📥 **Advanced Model Loading** - Preloading, sharding, resume download support
-- 💿 **Intelligent Caching** - IndexedDB-based model caching for offline use
-- ⚡ **High Performance** - WebGPU-first with automatic fallback to WebNN/WASM
-- 🤗 **HuggingFace Hub** - Direct model download from HuggingFace with one line
+- 📋 **Task Scheduler** - Priority queue, concurrency control, task cancellation
+- 🔄 **Batch Processing** - Efficient batch inference out of the box
+- 💾 **Memory Management** - Automatic memory tracking and cleanup with scopes
+- 📥 **Smart Model Loading** - Preloading, sharding, resume download support
+- 💿 **Offline Caching** - IndexedDB-based model caching for offline use
+- ⚡ **Multi-Backend** - WebGPU, WebNN, WASM with automatic fallback
+- 🤗 **HuggingFace Hub** - Direct model download with one line
 - 🔤 **Real Tokenizers** - BPE & WordPiece tokenizers, load tokenizer.json directly
 - 👷 **Web Worker Support** - Run inference in background threads
+- 📦 **Batteries Included** - ONNX Runtime bundled, zero configuration needed
+- 🎯 **TypeScript First** - Full type support with intuitive APIs
 
 ## 📦 Installation
 
 ```bash
-npm install edgeflow
+npm install edgeflowjs
 ```
 
 ```bash
-yarn add edgeflow
+yarn add edgeflowjs
 ```
 
 ```bash
-pnpm add edgeflow
+pnpm add edgeflowjs
 ```
+
+> **Note**: ONNX Runtime is included as a dependency. No additional setup required.
 
 ## 🚀 Quick Start
 
@@ -70,14 +71,14 @@ Open **http://localhost:3000** in your browser:
    - 🧮 **Tensor Operations** - Test tensor creation, math ops, softmax, relu
    - 📝 **Text Classification** - Run sentiment analysis on text
    - 🔍 **Feature Extraction** - Extract embeddings from text
-   - ⚡ **Concurrent Execution** - Test parallel inference
+   - ⚡ **Task Scheduling** - Test priority-based scheduling
    - 📋 **Task Scheduler** - Test priority-based task scheduling
    - 💾 **Memory Management** - Test allocation and cleanup
 
 ### Basic Usage
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 // Create a sentiment analysis pipeline
 const sentiment = await pipeline('sentiment-analysis');
@@ -106,16 +107,16 @@ console.log(results);
 // ]
 ```
 
-### Concurrent Execution
+### Multiple Pipelines
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 // Create multiple pipelines
 const classifier = await pipeline('text-classification');
 const extractor = await pipeline('feature-extraction');
 
-// Run concurrently - no more serial bottleneck!
+// Run in parallel with Promise.all
 const [classification, features] = await Promise.all([
   classifier.run('Sample text'),
   extractor.run('Sample text')
@@ -125,7 +126,7 @@ const [classification, features] = await Promise.all([
 ### Image Classification
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 const classifier = await pipeline('image-classification');
 
@@ -143,7 +144,7 @@ const results = await classifier.run([img1, img2, img3]);
 ### Text Generation (Streaming)
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 const generator = await pipeline('text-generation');
 
@@ -164,7 +165,7 @@ for await (const event of generator.stream('Hello, ')) {
 ### Zero-shot Classification
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 const classifier = await pipeline('zero-shot-classification');
 
@@ -180,7 +181,7 @@ console.log(result.labels[0], result.scores[0]);
 ### Question Answering
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 const qa = await pipeline('question-answering');
 
@@ -195,7 +196,7 @@ console.log(result.answer); // 'Paris'
 ### Load from HuggingFace Hub
 
 ```typescript
-import { fromHub, fromTask } from 'edgeflow';
+import { fromHub, fromTask } from 'edgeflowjs';
 
 // Load by model ID (auto-downloads model, tokenizer, config)
 const bundle = await fromHub('Xenova/distilbert-base-uncased-finetuned-sst-2-english');
@@ -209,7 +210,7 @@ const sentimentBundle = await fromTask('sentiment-analysis');
 ### Web Workers (Background Inference)
 
 ```typescript
-import { runInWorker, WorkerPool, isWorkerSupported } from 'edgeflow';
+import { runInWorker, WorkerPool, isWorkerSupported } from 'edgeflowjs';
 
 // Simple: run inference in background thread
 if (isWorkerSupported()) {
@@ -240,36 +241,27 @@ pool.terminate();
 | Zero-shot Classification | `zero-shot-classification` | ✅ |
 | Question Answering | `question-answering` | ✅ |
 
-## ⚡ Performance
+## ⚡ Key Differentiators
 
 ### Comparison with transformers.js
 
 | Feature | transformers.js | edgeFlow.js |
 |---------|-----------------|-------------|
-| Concurrent Execution | ❌ Serial | ✅ Parallel |
-| Batch Processing | ⚠️ Partial | ✅ Native |
-| Memory Management | ⚠️ Basic | ✅ Complete |
-| Bundle Size | ~2-5MB | <500KB |
-| Dependencies | ONNX Runtime | Optional |
-
-### Benchmarks
-
-```
-Text Classification (BERT-base):
-- transformers.js: 45ms (serial)
-- edgeFlow.js: 42ms (parallel capable)
-
-Concurrent 4 models:
-- transformers.js: 180ms (4 × 45ms serial)
-- edgeFlow.js: 52ms (parallel execution)
-```
+| Task Scheduler | ❌ None | ✅ Priority queue with limits |
+| Task Cancellation | ❌ None | ✅ Cancel pending tasks |
+| Batch Processing | ⚠️ Manual | ✅ Built-in batching |
+| Memory Scopes | ❌ None | ✅ Auto cleanup with scopes |
+| Model Preloading | ❌ None | ✅ Background loading |
+| Resume Download | ❌ None | ✅ Chunked with resume |
+| Model Caching | ⚠️ Basic | ✅ IndexedDB with stats |
+| TypeScript | ✅ Full | ✅ Full |
 
 ## 🔧 Configuration
 
 ### Runtime Selection
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 // Automatic (recommended)
 const model = await pipeline('text-classification');
@@ -283,7 +275,7 @@ const model = await pipeline('text-classification', {
 ### Memory Management
 
 ```typescript
-import { pipeline, getMemoryStats, gc } from 'edgeflow';
+import { pipeline, getMemoryStats, gc } from 'edgeflowjs';
 
 const model = await pipeline('text-classification');
 
@@ -304,7 +296,7 @@ gc();
 ### Scheduler Configuration
 
 ```typescript
-import { configureScheduler } from 'edgeflow';
+import { configureScheduler } from 'edgeflowjs';
 
 configureScheduler({
   maxConcurrentTasks: 4,
@@ -318,7 +310,7 @@ configureScheduler({
 ### Caching
 
 ```typescript
-import { pipeline, Cache } from 'edgeflow';
+import { pipeline, Cache } from 'edgeflowjs';
 
 // Create a cache
 const cache = new Cache({
@@ -337,7 +329,7 @@ const model = await pipeline('text-classification', {
 ### Custom Model Loading
 
 ```typescript
-import { loadModel, runInference } from 'edgeflow';
+import { loadModel, runInference } from 'edgeflowjs';
 
 // Load from URL with caching, sharding, and resume support
 const model = await loadModel('https://example.com/model.bin', {
@@ -359,7 +351,7 @@ model.dispose();
 ### Preloading Models
 
 ```typescript
-import { preloadModel, preloadModels, getPreloadStatus } from 'edgeflow';
+import { preloadModel, preloadModels, getPreloadStatus } from 'edgeflowjs';
 
 // Preload a single model in background (with priority)
 preloadModel('https://example.com/model1.onnx', { priority: 10 });
@@ -384,7 +376,7 @@ import {
   deleteCachedModel, 
   clearModelCache,
   getModelCacheStats 
-} from 'edgeflow';
+} from 'edgeflowjs';
 
 // Check if model is cached
 if (await isModelCached('https://example.com/model.onnx')) {
@@ -410,7 +402,7 @@ console.log(`${stats.models} models cached, ${stats.totalSize} bytes total`);
 Large model downloads automatically support resuming from where they left off:
 
 ```typescript
-import { loadModelData } from 'edgeflow';
+import { loadModelData } from 'edgeflowjs';
 
 // Download with progress and resume support
 const modelData = await loadModelData('https://example.com/large-model.onnx', {
@@ -429,7 +421,7 @@ const modelData = await loadModelData('https://example.com/large-model.onnx', {
 ### Model Quantization
 
 ```typescript
-import { quantize } from 'edgeflow/tools';
+import { quantize } from 'edgeflowjs/tools';
 
 const quantized = await quantize(model, {
   method: 'int8',
@@ -443,7 +435,7 @@ console.log(`Compression: ${quantized.compressionRatio}x`);
 ### Benchmarking
 
 ```typescript
-import { benchmark } from 'edgeflow/tools';
+import { benchmark } from 'edgeflowjs/tools';
 
 const result = await benchmark(
   () => model.run('sample text'),
@@ -462,7 +454,7 @@ console.log(result);
 ### Memory Scope
 
 ```typescript
-import { withMemoryScope, tensor } from 'edgeflow';
+import { withMemoryScope, tensor } from 'edgeflowjs';
 
 const result = await withMemoryScope(async (scope) => {
   // Tensors tracked in scope
@@ -481,7 +473,7 @@ const result = await withMemoryScope(async (scope) => {
 ## 🔌 Tensor Operations
 
 ```typescript
-import { tensor, zeros, ones, matmul, softmax, relu } from 'edgeflow';
+import { tensor, zeros, ones, matmul, softmax, relu } from 'edgeflowjs';
 
 // Create tensors
 const a = tensor([[1, 2], [3, 4]]);

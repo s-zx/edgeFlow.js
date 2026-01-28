@@ -12,7 +12,7 @@ const rootDir = join(__dirname, '..');
 async function build() {
   try {
     // Build browser bundle
-    // onnxruntime-web is loaded dynamically from CDN at runtime
+    // onnxruntime-web is a direct dependency, marked external for bundler handling
     await esbuild.build({
       entryPoints: [join(rootDir, 'dist/index.js')],
       bundle: true,
@@ -22,7 +22,7 @@ async function build() {
       target: ['es2020'],
       sourcemap: true,
       minify: false,
-      external: ['onnxruntime-web'], // Loaded dynamically from CDN
+      external: ['onnxruntime-web'], // External: user's bundler will handle this
       define: {
         'process.env.NODE_ENV': '"production"',
       },
@@ -50,8 +50,6 @@ async function build() {
     console.log('✓ Browser bundles created successfully');
     console.log('  - dist/edgeflow.browser.js');
     console.log('  - dist/edgeflow.browser.min.js');
-    console.log('');
-    console.log('Note: ONNX Runtime is loaded automatically from CDN when needed.');
   } catch (error) {
     console.error('Build failed:', error);
     process.exit(1);

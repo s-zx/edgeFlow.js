@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**轻量级、高性能的浏览器端机器学习推理框架**
+**浏览器端机器学习推理框架，内置任务调度和智能缓存**
 
 [![npm version](https://img.shields.io/npm/v/edgeflowjs.svg)](https://www.npmjs.com/package/edgeflowjs)
 [![install size](https://packagephobia.com/badge?p=edgeflowjs)](https://packagephobia.com/result?p=edgeflowjs)
@@ -16,32 +16,33 @@
 
 ## ✨ 特性
 
-- 🚀 **原生并发** - 并行运行多个模型，告别串行执行瓶颈
-- 📦 **轻量级** - 核心包 < 500KB，零运行时依赖
-- 🔄 **原生批处理** - 开箱即用的高效批量推理
-- 💾 **智能内存管理** - 自动内存追踪和清理
-- 🎯 **开发者友好** - 完整的 TypeScript 支持和直观的 API
-- 🔌 **模块化架构** - 按需导入
-- 📥 **模型加载优化** - 支持预加载、分片下载、断点续传
-- 💿 **支持模型缓存** - 基于 IndexedDB 的模型缓存，支持离线使用
-- ⚡ **高性能** - WebGPU 优先，自动降级到 WebNN/WASM
+- 📋 **任务调度器** - 优先级队列、并发控制、任务取消
+- 🔄 **批量处理** - 开箱即用的高效批量推理
+- 💾 **内存管理** - 自动内存追踪和作用域清理
+- 📥 **智能模型加载** - 支持预加载、分片下载、断点续传
+- 💿 **离线缓存** - 基于 IndexedDB 的模型缓存，支持离线使用
+- ⚡ **多后端支持** - WebGPU、WebNN、WASM 自动降级
 - 🤗 **HuggingFace Hub** - 一行代码从 HuggingFace 下载模型
 - 🔤 **真实分词器** - BPE 和 WordPiece 分词器，直接加载 tokenizer.json
 - 👷 **Web Worker 支持** - 在后台线程运行推理
+- 📦 **开箱即用** - 内置 ONNX Runtime，零配置直接使用
+- 🎯 **TypeScript 优先** - 完整的类型支持和直观的 API
 
 ## 📦 安装
 
 ```bash
-npm install edgeflow
+npm install edgeflowjs
 ```
 
 ```bash
-yarn add edgeflow
+yarn add edgeflowjs
 ```
 
 ```bash
-pnpm add edgeflow
+pnpm add edgeflowjs
 ```
+
+> **注意**: ONNX Runtime 已作为依赖包含，无需额外配置。
 
 ## 🚀 快速开始
 
@@ -70,14 +71,14 @@ npm run demo
    - 🧮 **张量运算** - 测试张量创建、数学运算、softmax、relu
    - 📝 **文本分类** - 对文本进行情感分析
    - 🔍 **特征提取** - 从文本中提取嵌入向量
-   - ⚡ **并发执行** - 测试并行推理
+   - ⚡ **任务调度** - 测试优先级调度
    - 📋 **任务调度** - 测试基于优先级的任务调度
    - 💾 **内存管理** - 测试内存分配和清理
 
 ### 基础用法
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 // 创建情感分析流水线
 const sentiment = await pipeline('sentiment-analysis');
@@ -106,16 +107,16 @@ console.log(results);
 // ]
 ```
 
-### 并发执行
+### 多流水线
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 // 创建多个流水线
 const classifier = await pipeline('text-classification');
 const extractor = await pipeline('feature-extraction');
 
-// 并发运行 - 不再有串行瓶颈！
+// 使用 Promise.all 并行运行
 const [classification, features] = await Promise.all([
   classifier.run('Sample text'),
   extractor.run('Sample text')
@@ -125,7 +126,7 @@ const [classification, features] = await Promise.all([
 ### 图像分类
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 const classifier = await pipeline('image-classification');
 
@@ -143,7 +144,7 @@ const results = await classifier.run([img1, img2, img3]);
 ### 文本生成（流式输出）
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 const generator = await pipeline('text-generation');
 
@@ -164,7 +165,7 @@ for await (const event of generator.stream('你好，')) {
 ### 零样本分类
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 const classifier = await pipeline('zero-shot-classification');
 
@@ -180,7 +181,7 @@ console.log(result.labels[0], result.scores[0]);
 ### 问答系统
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 const qa = await pipeline('question-answering');
 
@@ -195,7 +196,7 @@ console.log(result.answer); // '巴黎'
 ### 从 HuggingFace Hub 加载
 
 ```typescript
-import { fromHub, fromTask } from 'edgeflow';
+import { fromHub, fromTask } from 'edgeflowjs';
 
 // 通过模型 ID 加载（自动下载模型、分词器、配置）
 const bundle = await fromHub('Xenova/distilbert-base-uncased-finetuned-sst-2-english');
@@ -209,7 +210,7 @@ const sentimentBundle = await fromTask('sentiment-analysis');
 ### Web Workers（后台推理）
 
 ```typescript
-import { runInWorker, WorkerPool, isWorkerSupported } from 'edgeflow';
+import { runInWorker, WorkerPool, isWorkerSupported } from 'edgeflowjs';
 
 // 简单：在后台线程运行推理
 if (isWorkerSupported()) {
@@ -240,36 +241,27 @@ pool.terminate();
 | 零样本分类 | `zero-shot-classification` | ✅ |
 | 问答系统 | `question-answering` | ✅ |
 
-## ⚡ 性能
+## ⚡ 核心差异
 
 ### 与 transformers.js 对比
 
 | 特性 | transformers.js | edgeFlow.js |
 |------|-----------------|-------------|
-| 并发执行 | ❌ 串行 | ✅ 并行 |
-| 批处理 | ⚠️ 部分支持 | ✅ 原生支持 |
-| 内存管理 | ⚠️ 基础 | ✅ 完整 |
-| 包大小 | ~2-5MB | <500KB |
-| 依赖 | ONNX Runtime | 可选 |
-
-### 基准测试
-
-```
-文本分类 (BERT-base):
-- transformers.js: 45ms (串行)
-- edgeFlow.js: 42ms (支持并行)
-
-并发 4 个模型:
-- transformers.js: 180ms (4 × 45ms 串行)
-- edgeFlow.js: 52ms (并行执行)
-```
+| 任务调度器 | ❌ 无 | ✅ 优先级队列 + 并发限制 |
+| 任务取消 | ❌ 无 | ✅ 支持取消排队任务 |
+| 批量处理 | ⚠️ 手动 | ✅ 内置批处理 |
+| 内存作用域 | ❌ 无 | ✅ 作用域自动清理 |
+| 模型预加载 | ❌ 无 | ✅ 后台加载 |
+| 断点续传 | ❌ 无 | ✅ 分片 + 续传 |
+| 模型缓存 | ⚠️ 基础 | ✅ IndexedDB + 统计 |
+| TypeScript | ✅ 完整 | ✅ 完整 |
 
 ## 🔧 配置
 
 ### 运行时选择
 
 ```typescript
-import { pipeline } from 'edgeflow';
+import { pipeline } from 'edgeflowjs';
 
 // 自动选择（推荐）
 const model = await pipeline('text-classification');
@@ -283,7 +275,7 @@ const model = await pipeline('text-classification', {
 ### 内存管理
 
 ```typescript
-import { pipeline, getMemoryStats, gc } from 'edgeflow';
+import { pipeline, getMemoryStats, gc } from 'edgeflowjs';
 
 const model = await pipeline('text-classification');
 
@@ -304,7 +296,7 @@ gc();
 ### 调度器配置
 
 ```typescript
-import { configureScheduler } from 'edgeflow';
+import { configureScheduler } from 'edgeflowjs';
 
 configureScheduler({
   maxConcurrentTasks: 4,
@@ -318,7 +310,7 @@ configureScheduler({
 ### 缓存
 
 ```typescript
-import { pipeline, Cache } from 'edgeflow';
+import { pipeline, Cache } from 'edgeflowjs';
 
 // 创建缓存
 const cache = new Cache({
@@ -337,7 +329,7 @@ const model = await pipeline('text-classification', {
 ### 自定义模型加载
 
 ```typescript
-import { loadModel, runInference } from 'edgeflow';
+import { loadModel, runInference } from 'edgeflowjs';
 
 // 从 URL 加载，支持缓存、分片和断点续传
 const model = await loadModel('https://example.com/model.bin', {
@@ -359,7 +351,7 @@ model.dispose();
 ### 模型预加载
 
 ```typescript
-import { preloadModel, preloadModels, getPreloadStatus } from 'edgeflow';
+import { preloadModel, preloadModels, getPreloadStatus } from 'edgeflowjs';
 
 // 后台预加载单个模型（支持优先级）
 preloadModel('https://example.com/model1.onnx', { priority: 10 });
@@ -384,7 +376,7 @@ import {
   deleteCachedModel, 
   clearModelCache,
   getModelCacheStats 
-} from 'edgeflow';
+} from 'edgeflowjs';
 
 // 检查模型是否已缓存
 if (await isModelCached('https://example.com/model.onnx')) {
@@ -410,7 +402,7 @@ console.log(`${stats.models} 个模型已缓存，共 ${stats.totalSize} 字节`
 大模型下载自动支持从断点处继续：
 
 ```typescript
-import { loadModelData } from 'edgeflow';
+import { loadModelData } from 'edgeflowjs';
 
 // 带进度和断点续传的下载
 const modelData = await loadModelData('https://example.com/large-model.onnx', {
@@ -429,7 +421,7 @@ const modelData = await loadModelData('https://example.com/large-model.onnx', {
 ### 模型量化
 
 ```typescript
-import { quantize } from 'edgeflow/tools';
+import { quantize } from 'edgeflowjs/tools';
 
 const quantized = await quantize(model, {
   method: 'int8',
@@ -443,7 +435,7 @@ console.log(`压缩比: ${quantized.compressionRatio}x`);
 ### 性能测试
 
 ```typescript
-import { benchmark } from 'edgeflow/tools';
+import { benchmark } from 'edgeflowjs/tools';
 
 const result = await benchmark(
   () => model.run('sample text'),
@@ -462,7 +454,7 @@ console.log(result);
 ### 内存作用域
 
 ```typescript
-import { withMemoryScope, tensor } from 'edgeflow';
+import { withMemoryScope, tensor } from 'edgeflowjs';
 
 const result = await withMemoryScope(async (scope) => {
   // 在作用域中追踪张量
@@ -481,7 +473,7 @@ const result = await withMemoryScope(async (scope) => {
 ## 🔌 张量操作
 
 ```typescript
-import { tensor, zeros, ones, matmul, softmax, relu } from 'edgeflow';
+import { tensor, zeros, ones, matmul, softmax, relu } from 'edgeflowjs';
 
 // 创建张量
 const a = tensor([[1, 2], [3, 4]]);

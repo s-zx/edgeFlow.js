@@ -2,77 +2,18 @@
  * edgeFlow.js - ONNX Runtime Backend
  *
  * Uses onnxruntime-web for real ONNX model inference.
- * Automatically loads ONNX Runtime from CDN when needed.
  */
+import * as ort from 'onnxruntime-web';
 import { EdgeFlowError, ErrorCodes, } from '../core/types.js';
 import { LoadedModelImpl } from '../core/runtime.js';
 import { EdgeFlowTensor } from '../core/tensor.js';
 import { getMemoryManager } from '../core/memory.js';
-// ONNX Runtime CDN configuration
-const ONNX_VERSION = '1.17.0';
-const ONNX_CDN_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNX_VERSION}/dist/`;
-const ONNX_SCRIPT_URL = `${ONNX_CDN_BASE}ort.min.js`;
-// Global ONNX Runtime reference (loaded dynamically)
-let ort = null;
-let ortLoadPromise = null;
-/**
- * Dynamically load ONNX Runtime from CDN
- */
-async function loadONNXRuntime() {
-    // Return cached instance
-    if (ort)
-        return ort;
-    // Return existing load promise to avoid duplicate loading
-    if (ortLoadPromise)
-        return ortLoadPromise;
-    ortLoadPromise = new Promise((resolve, reject) => {
-        // Check if already loaded globally (e.g., via script tag)
-        if (typeof window !== 'undefined' && window.ort) {
-            ort = window.ort;
-            // Configure WASM paths
-            ort.env.wasm.wasmPaths = ONNX_CDN_BASE;
-            resolve(ort);
-            return;
-        }
-        // Dynamically load the script
-        const script = document.createElement('script');
-        script.src = ONNX_SCRIPT_URL;
-        script.async = true;
-        script.onload = () => {
-            if (window.ort) {
-                ort = window.ort;
-                // Configure WASM paths
-                ort.env.wasm.wasmPaths = ONNX_CDN_BASE;
-                console.log(`✓ ONNX Runtime v${ONNX_VERSION} loaded from CDN`);
-                resolve(ort);
-            }
-            else {
-                reject(new Error('ONNX Runtime loaded but ort global not found'));
-            }
-        };
-        script.onerror = () => {
-            reject(new Error(`Failed to load ONNX Runtime from ${ONNX_SCRIPT_URL}`));
-        };
-        document.head.appendChild(script);
-    });
-    return ortLoadPromise;
-}
-/**
- * Get ONNX Runtime instance (loads if needed)
- */
-async function getOrt() {
-    if (!ort) {
-        ort = await loadONNXRuntime();
-    }
-    return ort;
-}
 const sessionStore = new Map();
 // ============================================================================
 // ONNX Runtime Implementation
 // ============================================================================
 /**
  * ONNXRuntime - Real ONNX model inference using onnxruntime-web
- * Automatically loads ONNX Runtime from CDN when first used.
  */
 export class ONNXRuntime {
     name = 'wasm'; // Register as wasm since it's the fallback
@@ -89,22 +30,17 @@ export class ONNXRuntime {
         };
     }
     /**
-     * Check if ONNX Runtime is available (always true - will be loaded from CDN)
+     * Check if ONNX Runtime is available
      */
     async isAvailable() {
-        // Always return true - we'll load ONNX Runtime from CDN when needed
         return true;
     }
     /**
-     * Initialize the ONNX runtime (loads from CDN if needed)
+     * Initialize the ONNX runtime
      */
     async initialize() {
         if (this.initialized)
             return;
-        // Load ONNX Runtime from CDN
-        const ortInstance = await getOrt();
-        // Configure WASM paths
-        ortInstance.env.wasm.wasmPaths = ONNX_CDN_BASE;
         // Use WASM execution provider (most compatible)
         this.executionProvider = 'wasm';
         this.initialized = true;
@@ -116,7 +52,6 @@ export class ONNXRuntime {
         if (!this.initialized) {
             await this.initialize();
         }
-        const ortInstance = await getOrt();
         try {
             // Create session options
             const sessionOptions = {
@@ -125,7 +60,7 @@ export class ONNXRuntime {
             };
             // Create inference session (convert ArrayBuffer to Uint8Array)
             const modelBytes = new Uint8Array(modelData);
-            const session = await ortInstance.InferenceSession.create(modelBytes, sessionOptions);
+            const session = await ort.InferenceSession.create(modelBytes, sessionOptions);
             // Get input/output names
             const inputNames = session.inputNames;
             const outputNames = session.outputNames;
@@ -175,7 +110,6 @@ export class ONNXRuntime {
         if (!sessionData) {
             throw new EdgeFlowError(`ONNX session not found for model ${model.id}`, ErrorCodes.MODEL_NOT_LOADED, { modelId: model.id });
         }
-        const ortInstance = await getOrt();
         const { session, inputNames, outputNames } = sessionData;
         try {
             // Prepare input feeds
@@ -190,15 +124,15 @@ export class ONNXRuntime {
                     if (dtype === 'int64') {
                         // Get raw BigInt64Array data directly
                         const data = inputTensor.data;
-                        ortTensor = new ortInstance.Tensor('int64', data, inputTensor.shape);
+                        ortTensor = new ort.Tensor('int64', data, inputTensor.shape);
                     }
                     else if (dtype === 'int32') {
                         const data = inputTensor.data;
-                        ortTensor = new ortInstance.Tensor('int32', data, inputTensor.shape);
+                        ortTensor = new ort.Tensor('int32', data, inputTensor.shape);
                     }
                     else {
                         const data = inputTensor.toFloat32Array();
-                        ortTensor = new ortInstance.Tensor('float32', data, inputTensor.shape);
+                        ortTensor = new ort.Tensor('float32', data, inputTensor.shape);
                     }
                     feeds[inputName] = ortTensor;
                 }
