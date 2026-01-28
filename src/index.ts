@@ -282,27 +282,98 @@ export {
 // ============================================================================
 
 export {
-  // Quantization
+  // Quantization (basic)
   quantize,
   type QuantizationOptions,
   type QuantizationResult,
   
-  // Pruning
+  // Pruning (basic)
   prune,
   type PruningOptions,
   type PruningResult,
   
-  // Analysis
+  // Analysis (basic)
   analyzeModel,
   type ModelAnalysis,
   
-  // Benchmarking
+  // Benchmarking (basic)
   benchmark,
   type BenchmarkOptions,
   type BenchmarkResult,
   
   // Export
   exportModel,
+  
+  // Advanced Quantization
+  quantizeModel,
+  quantizeTensor,
+  dequantizeTensor,
+  pruneModel,
+  pruneTensor,
+  analyzeModelDetailed,
+  exportModelAdvanced,
+  dequantizeInt8,
+  dequantizeUint8,
+  dequantizeFloat16,
+  float16ToFloat32,
+  type QuantizationMethod,
+  type AdvancedQuantizationOptions,
+  type QuantizationProgress,
+  type AdvancedQuantizationResult,
+  type LayerQuantizationStats,
+  type QuantizationStats,
+  type AdvancedPruningOptions,
+  type AdvancedPruningResult,
+  type DetailedModelAnalysis,
+  type ExportFormat,
+  type ExportOptions,
+  
+  // Debugging Tools
+  EdgeFlowDebugger,
+  getDebugger,
+  enableDebugging,
+  disableDebugging,
+  inspectTensor,
+  formatTensorInspection,
+  createAsciiHistogram,
+  createTensorHeatmap,
+  visualizeModelArchitecture,
+  type DebuggerConfig,
+  type TensorInspection,
+  type TensorStats,
+  type HistogramData,
+  type InferenceTrace,
+  type OperationTrace,
+  type DebugEvent,
+  type DebugPerformanceMetrics,
+  
+  // Performance Monitor
+  PerformanceMonitor,
+  getMonitor,
+  startMonitoring,
+  stopMonitoring,
+  generateDashboardHTML,
+  generateAsciiDashboard,
+  type MonitorConfig,
+  type PerformanceSample,
+  type InferenceMetrics,
+  type MemoryMetrics,
+  type SystemMetrics,
+  type AlertConfig,
+  type AlertEvent,
+  type WidgetData,
+  
+  // Benchmark utilities
+  runBenchmark,
+  compareBenchmarks,
+  benchmarkSuite,
+  benchmarkMemory,
+  formatBenchmarkResult,
+  formatComparisonResult,
+  type DetailedBenchmarkOptions,
+  type DetailedBenchmarkResult,
+  type CompareBenchmarkResult,
+  type MemoryBenchmarkResult,
 } from './tools/index.js';
 
 // ============================================================================

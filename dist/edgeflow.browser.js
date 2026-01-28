@@ -15,6 +15,662 @@ var __publicField = (obj, key, value) => {
   return value;
 };
 
+// dist/core/types.js
+var EdgeFlowError, ErrorCodes;
+var init_types = __esm({
+  "dist/core/types.js"() {
+    "use strict";
+    EdgeFlowError = class extends Error {
+      constructor(message, code, details) {
+        super(message);
+        __publicField(this, "code");
+        __publicField(this, "details");
+        this.code = code;
+        this.details = details;
+        this.name = "EdgeFlowError";
+      }
+    };
+    ErrorCodes = {
+      // Runtime errors
+      RUNTIME_NOT_AVAILABLE: "RUNTIME_NOT_AVAILABLE",
+      RUNTIME_INIT_FAILED: "RUNTIME_INIT_FAILED",
+      RUNTIME_NOT_INITIALIZED: "RUNTIME_NOT_INITIALIZED",
+      // Model errors
+      MODEL_NOT_FOUND: "MODEL_NOT_FOUND",
+      MODEL_LOAD_FAILED: "MODEL_LOAD_FAILED",
+      MODEL_INVALID_FORMAT: "MODEL_INVALID_FORMAT",
+      MODEL_NOT_LOADED: "MODEL_NOT_LOADED",
+      // Inference errors
+      INFERENCE_FAILED: "INFERENCE_FAILED",
+      INFERENCE_TIMEOUT: "INFERENCE_TIMEOUT",
+      INFERENCE_CANCELLED: "INFERENCE_CANCELLED",
+      // Memory errors
+      OUT_OF_MEMORY: "OUT_OF_MEMORY",
+      MEMORY_LEAK_DETECTED: "MEMORY_LEAK_DETECTED",
+      // Tensor errors
+      TENSOR_SHAPE_MISMATCH: "TENSOR_SHAPE_MISMATCH",
+      TENSOR_DTYPE_MISMATCH: "TENSOR_DTYPE_MISMATCH",
+      TENSOR_DISPOSED: "TENSOR_DISPOSED",
+      // Pipeline errors
+      PIPELINE_NOT_SUPPORTED: "PIPELINE_NOT_SUPPORTED",
+      PIPELINE_INPUT_INVALID: "PIPELINE_INPUT_INVALID",
+      // General errors
+      INVALID_ARGUMENT: "INVALID_ARGUMENT",
+      NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
+      UNKNOWN_ERROR: "UNKNOWN_ERROR"
+    };
+  }
+});
+
+// dist/core/tensor.js
+function generateTensorId() {
+  return `tensor_${++tensorIdCounter}_${Date.now().toString(36)}`;
+}
+function getTypedArrayConstructor(dtype) {
+  switch (dtype) {
+    case "float32":
+      return Float32Array;
+    case "float16":
+      return Float32Array;
+    case "int32":
+      return Int32Array;
+    case "int64":
+      return BigInt64Array;
+    case "uint8":
+    case "bool":
+      return Uint8Array;
+    case "int8":
+      return Int8Array;
+    default:
+      throw new EdgeFlowError(`Unsupported data type: ${dtype}`, ErrorCodes.INVALID_ARGUMENT, { dtype });
+  }
+}
+function calculateSize(shape) {
+  if (shape.length === 0)
+    return 1;
+  return shape.reduce((acc, dim) => acc * dim, 1);
+}
+function validateShape(shape) {
+  for (let i = 0; i < shape.length; i++) {
+    const dim = shape[i];
+    if (dim === void 0 || !Number.isInteger(dim) || dim < 0) {
+      throw new EdgeFlowError(`Invalid shape dimension at index ${i}: ${dim}`, ErrorCodes.INVALID_ARGUMENT, { shape, index: i, dimension: dim });
+    }
+  }
+}
+function tensor(data, shape, dtype = "float32") {
+  if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0])) {
+    const rows = data.length;
+    const cols = data[0].length;
+    const flatData = [];
+    for (const row of data) {
+      if (row.length !== cols) {
+        throw new EdgeFlowError("Nested arrays must have consistent dimensions", ErrorCodes.INVALID_ARGUMENT);
+      }
+      flatData.push(...row);
+    }
+    return new EdgeFlowTensor(flatData, shape ?? [rows, cols], dtype);
+  }
+  const inferredShape = shape ?? [data.length];
+  return new EdgeFlowTensor(data, inferredShape, dtype);
+}
+function zeros(shape, dtype = "float32") {
+  const size = calculateSize(shape);
+  const TypedArrayCtor = getTypedArrayConstructor(dtype);
+  const data = new TypedArrayCtor(size);
+  return new EdgeFlowTensor(data, shape, dtype);
+}
+function ones(shape, dtype = "float32") {
+  const size = calculateSize(shape);
+  const TypedArrayCtor = getTypedArrayConstructor(dtype);
+  const data = new TypedArrayCtor(size);
+  data.fill(1);
+  return new EdgeFlowTensor(data, shape, dtype);
+}
+function full(shape, value, dtype = "float32") {
+  const size = calculateSize(shape);
+  const TypedArrayCtor = getTypedArrayConstructor(dtype);
+  const data = new TypedArrayCtor(size);
+  data.fill(value);
+  return new EdgeFlowTensor(data, shape, dtype);
+}
+function random(shape, dtype = "float32") {
+  const size = calculateSize(shape);
+  const data = new Float32Array(size);
+  for (let i = 0; i < size; i++) {
+    data[i] = Math.random();
+  }
+  return new EdgeFlowTensor(data, shape, dtype);
+}
+function randn(shape, dtype = "float32") {
+  const size = calculateSize(shape);
+  const data = new Float32Array(size);
+  for (let i = 0; i < size; i += 2) {
+    const u1 = Math.random();
+    const u2 = Math.random();
+    const r = Math.sqrt(-2 * Math.log(u1));
+    const theta = 2 * Math.PI * u2;
+    data[i] = r * Math.cos(theta);
+    if (i + 1 < size) {
+      data[i + 1] = r * Math.sin(theta);
+    }
+  }
+  return new EdgeFlowTensor(data, shape, dtype);
+}
+function arange(start, stop, step = 1, dtype = "float32") {
+  if (stop === void 0) {
+    stop = start;
+    start = 0;
+  }
+  const size = Math.ceil((stop - start) / step);
+  const data = new Float32Array(size);
+  for (let i = 0; i < size; i++) {
+    data[i] = start + i * step;
+  }
+  return new EdgeFlowTensor(data, [size], dtype);
+}
+function linspace(start, stop, num = 50, dtype = "float32") {
+  const data = new Float32Array(num);
+  const step = (stop - start) / (num - 1);
+  for (let i = 0; i < num; i++) {
+    data[i] = start + i * step;
+  }
+  return new EdgeFlowTensor(data, [num], dtype);
+}
+function eye(n, dtype = "float32") {
+  const data = new Float32Array(n * n);
+  for (let i = 0; i < n; i++) {
+    data[i * n + i] = 1;
+  }
+  return new EdgeFlowTensor(data, [n, n], dtype);
+}
+function add(a, b) {
+  if (typeof b === "number") {
+    const result2 = new Float32Array(a.size);
+    const aData2 = a.toFloat32Array();
+    for (let i = 0; i < a.size; i++) {
+      result2[i] = (aData2[i] ?? 0) + b;
+    }
+    return new EdgeFlowTensor(result2, a.shape, a.dtype);
+  }
+  if (a.size !== b.size) {
+    throw new EdgeFlowError("Tensor sizes must match for element-wise operations", ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
+  }
+  const result = new Float32Array(a.size);
+  const aData = a.toFloat32Array();
+  const bData = b.toFloat32Array();
+  for (let i = 0; i < a.size; i++) {
+    result[i] = (aData[i] ?? 0) + (bData[i] ?? 0);
+  }
+  return new EdgeFlowTensor(result, a.shape, a.dtype);
+}
+function sub(a, b) {
+  if (typeof b === "number") {
+    const result2 = new Float32Array(a.size);
+    const aData2 = a.toFloat32Array();
+    for (let i = 0; i < a.size; i++) {
+      result2[i] = (aData2[i] ?? 0) - b;
+    }
+    return new EdgeFlowTensor(result2, a.shape, a.dtype);
+  }
+  if (a.size !== b.size) {
+    throw new EdgeFlowError("Tensor sizes must match for element-wise operations", ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
+  }
+  const result = new Float32Array(a.size);
+  const aData = a.toFloat32Array();
+  const bData = b.toFloat32Array();
+  for (let i = 0; i < a.size; i++) {
+    result[i] = (aData[i] ?? 0) - (bData[i] ?? 0);
+  }
+  return new EdgeFlowTensor(result, a.shape, a.dtype);
+}
+function mul(a, b) {
+  if (typeof b === "number") {
+    const result2 = new Float32Array(a.size);
+    const aData2 = a.toFloat32Array();
+    for (let i = 0; i < a.size; i++) {
+      result2[i] = (aData2[i] ?? 0) * b;
+    }
+    return new EdgeFlowTensor(result2, a.shape, a.dtype);
+  }
+  if (a.size !== b.size) {
+    throw new EdgeFlowError("Tensor sizes must match for element-wise operations", ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
+  }
+  const result = new Float32Array(a.size);
+  const aData = a.toFloat32Array();
+  const bData = b.toFloat32Array();
+  for (let i = 0; i < a.size; i++) {
+    result[i] = (aData[i] ?? 0) * (bData[i] ?? 0);
+  }
+  return new EdgeFlowTensor(result, a.shape, a.dtype);
+}
+function div(a, b) {
+  if (typeof b === "number") {
+    const result2 = new Float32Array(a.size);
+    const aData2 = a.toFloat32Array();
+    for (let i = 0; i < a.size; i++) {
+      result2[i] = (aData2[i] ?? 0) / b;
+    }
+    return new EdgeFlowTensor(result2, a.shape, a.dtype);
+  }
+  if (a.size !== b.size) {
+    throw new EdgeFlowError("Tensor sizes must match for element-wise operations", ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
+  }
+  const result = new Float32Array(a.size);
+  const aData = a.toFloat32Array();
+  const bData = b.toFloat32Array();
+  for (let i = 0; i < a.size; i++) {
+    result[i] = (aData[i] ?? 0) / (bData[i] ?? 0);
+  }
+  return new EdgeFlowTensor(result, a.shape, a.dtype);
+}
+function matmul(a, b) {
+  if (a.shape.length !== 2 || b.shape.length !== 2) {
+    throw new EdgeFlowError("matmul requires 2D tensors", ErrorCodes.INVALID_ARGUMENT, { aShape: a.shape, bShape: b.shape });
+  }
+  const [m, k1] = a.shape;
+  const [k2, n] = b.shape;
+  if (k1 !== k2) {
+    throw new EdgeFlowError(`Matrix dimensions incompatible for multiplication: (${m}x${k1}) @ (${k2}x${n})`, ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
+  }
+  const result = new Float32Array(m * n);
+  const aData = a.toFloat32Array();
+  const bData = b.toFloat32Array();
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < n; j++) {
+      let sum2 = 0;
+      for (let k = 0; k < k1; k++) {
+        sum2 += (aData[i * k1 + k] ?? 0) * (bData[k * n + j] ?? 0);
+      }
+      result[i * n + j] = sum2;
+    }
+  }
+  return new EdgeFlowTensor(result, [m, n], a.dtype);
+}
+function softmax(t, axis = -1) {
+  const data = t.toFloat32Array();
+  const result = new Float32Array(t.size);
+  const actualAxis = axis < 0 ? t.shape.length + axis : axis;
+  if (actualAxis < 0 || actualAxis >= t.shape.length) {
+    throw new EdgeFlowError(`Invalid axis ${axis} for tensor with ${t.shape.length} dimensions`, ErrorCodes.INVALID_ARGUMENT, { axis, shape: t.shape });
+  }
+  if (t.shape.length === 1) {
+    let max = -Infinity;
+    for (let i = 0; i < t.size; i++) {
+      if ((data[i] ?? 0) > max)
+        max = data[i] ?? 0;
+    }
+    let sum2 = 0;
+    for (let i = 0; i < t.size; i++) {
+      result[i] = Math.exp((data[i] ?? 0) - max);
+      sum2 += result[i] ?? 0;
+    }
+    for (let i = 0; i < t.size; i++) {
+      result[i] = (result[i] ?? 0) / sum2;
+    }
+    return new EdgeFlowTensor(result, t.shape, t.dtype);
+  }
+  if (t.shape.length === 2 && actualAxis === 1) {
+    const [rows, cols] = t.shape;
+    for (let i = 0; i < rows; i++) {
+      let max = -Infinity;
+      for (let j = 0; j < cols; j++) {
+        if ((data[i * cols + j] ?? 0) > max)
+          max = data[i * cols + j] ?? 0;
+      }
+      let sum2 = 0;
+      for (let j = 0; j < cols; j++) {
+        result[i * cols + j] = Math.exp((data[i * cols + j] ?? 0) - max);
+        sum2 += result[i * cols + j] ?? 0;
+      }
+      for (let j = 0; j < cols; j++) {
+        result[i * cols + j] = (result[i * cols + j] ?? 0) / sum2;
+      }
+    }
+    return new EdgeFlowTensor(result, t.shape, t.dtype);
+  }
+  throw new EdgeFlowError("Softmax currently only supports 1D tensors or 2D tensors along the last axis", ErrorCodes.NOT_IMPLEMENTED, { shape: t.shape, axis });
+}
+function relu(t) {
+  const data = t.toFloat32Array();
+  const result = new Float32Array(t.size);
+  for (let i = 0; i < t.size; i++) {
+    result[i] = Math.max(0, data[i] ?? 0);
+  }
+  return new EdgeFlowTensor(result, t.shape, t.dtype);
+}
+function sigmoid(t) {
+  const data = t.toFloat32Array();
+  const result = new Float32Array(t.size);
+  for (let i = 0; i < t.size; i++) {
+    result[i] = 1 / (1 + Math.exp(-(data[i] ?? 0)));
+  }
+  return new EdgeFlowTensor(result, t.shape, t.dtype);
+}
+function tanh(t) {
+  const data = t.toFloat32Array();
+  const result = new Float32Array(t.size);
+  for (let i = 0; i < t.size; i++) {
+    result[i] = Math.tanh(data[i] ?? 0);
+  }
+  return new EdgeFlowTensor(result, t.shape, t.dtype);
+}
+function sum(t, axis) {
+  const data = t.toFloat32Array();
+  if (axis === void 0) {
+    let total = 0;
+    for (let i = 0; i < t.size; i++) {
+      total += data[i] ?? 0;
+    }
+    return total;
+  }
+  const actualAxis = axis < 0 ? t.shape.length + axis : axis;
+  if (actualAxis < 0 || actualAxis >= t.shape.length) {
+    throw new EdgeFlowError(`Invalid axis ${axis} for tensor with ${t.shape.length} dimensions`, ErrorCodes.INVALID_ARGUMENT, { axis, shape: t.shape });
+  }
+  const newShape = [...t.shape];
+  newShape.splice(actualAxis, 1);
+  if (newShape.length === 0) {
+    let total = 0;
+    for (let i = 0; i < t.size; i++) {
+      total += data[i] ?? 0;
+    }
+    return total;
+  }
+  if (t.shape.length === 2) {
+    const [rows, cols] = t.shape;
+    if (actualAxis === 0) {
+      const result = new Float32Array(cols);
+      for (let j = 0; j < cols; j++) {
+        for (let i = 0; i < rows; i++) {
+          result[j] = (result[j] ?? 0) + (data[i * cols + j] ?? 0);
+        }
+      }
+      return new EdgeFlowTensor(result, [cols], t.dtype);
+    } else {
+      const result = new Float32Array(rows);
+      for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols; j++) {
+          result[i] = (result[i] ?? 0) + (data[i * cols + j] ?? 0);
+        }
+      }
+      return new EdgeFlowTensor(result, [rows], t.dtype);
+    }
+  }
+  throw new EdgeFlowError("Sum along axis currently only supports up to 2D tensors", ErrorCodes.NOT_IMPLEMENTED, { shape: t.shape, axis });
+}
+function mean(t, axis) {
+  if (axis === void 0) {
+    return sum(t) / t.size;
+  }
+  const result = sum(t, axis);
+  if (typeof result === "number") {
+    return result / (t.shape[axis] ?? 1);
+  }
+  const axisSize = t.shape[axis] ?? 1;
+  return div(result, axisSize);
+}
+function argmax(t, axis) {
+  const data = t.toFloat32Array();
+  if (axis === void 0) {
+    let maxIdx = 0;
+    let maxVal = data[0] ?? -Infinity;
+    for (let i = 1; i < t.size; i++) {
+      if ((data[i] ?? -Infinity) > maxVal) {
+        maxVal = data[i] ?? -Infinity;
+        maxIdx = i;
+      }
+    }
+    return maxIdx;
+  }
+  const actualAxis = axis < 0 ? t.shape.length + axis : axis;
+  if (t.shape.length === 2 && actualAxis === 1) {
+    const [rows, cols] = t.shape;
+    const result = new Float32Array(rows);
+    for (let i = 0; i < rows; i++) {
+      let maxIdx = 0;
+      let maxVal = data[i * cols] ?? -Infinity;
+      for (let j = 1; j < cols; j++) {
+        if ((data[i * cols + j] ?? -Infinity) > maxVal) {
+          maxVal = data[i * cols + j] ?? -Infinity;
+          maxIdx = j;
+        }
+      }
+      result[i] = maxIdx;
+    }
+    return new EdgeFlowTensor(result, [rows], "int32");
+  }
+  throw new EdgeFlowError("Argmax along axis currently only supports 2D tensors along the last axis", ErrorCodes.NOT_IMPLEMENTED, { shape: t.shape, axis });
+}
+function concat(tensors, axis = 0) {
+  if (tensors.length === 0) {
+    throw new EdgeFlowError("Cannot concatenate empty array of tensors", ErrorCodes.INVALID_ARGUMENT);
+  }
+  if (tensors.length === 1) {
+    return tensors[0]?.clone() ?? zeros([0]);
+  }
+  const first = tensors[0];
+  if (!first) {
+    throw new EdgeFlowError("First tensor is undefined", ErrorCodes.INVALID_ARGUMENT);
+  }
+  const actualAxis = axis < 0 ? first.shape.length + axis : axis;
+  for (let i = 1; i < tensors.length; i++) {
+    const t = tensors[i];
+    if (!t)
+      continue;
+    if (t.shape.length !== first.shape.length) {
+      throw new EdgeFlowError("All tensors must have the same number of dimensions", ErrorCodes.TENSOR_SHAPE_MISMATCH);
+    }
+    for (let j = 0; j < first.shape.length; j++) {
+      if (j !== actualAxis && first.shape[j] !== t.shape[j]) {
+        throw new EdgeFlowError(`Shape mismatch at dimension ${j}`, ErrorCodes.TENSOR_SHAPE_MISMATCH);
+      }
+    }
+  }
+  const newShape = [...first.shape];
+  let totalAxisSize = 0;
+  for (const t of tensors) {
+    if (t)
+      totalAxisSize += t.shape[actualAxis] ?? 0;
+  }
+  newShape[actualAxis] = totalAxisSize;
+  if (first.shape.length === 1) {
+    const result = new Float32Array(totalAxisSize);
+    let offset = 0;
+    for (const t of tensors) {
+      if (!t)
+        continue;
+      result.set(t.toFloat32Array(), offset);
+      offset += t.size;
+    }
+    return new EdgeFlowTensor(result, newShape, first.dtype);
+  }
+  throw new EdgeFlowError("Concatenation currently only supports 1D tensors", ErrorCodes.NOT_IMPLEMENTED);
+}
+var tensorIdCounter, EdgeFlowTensor;
+var init_tensor = __esm({
+  "dist/core/tensor.js"() {
+    "use strict";
+    init_types();
+    tensorIdCounter = 0;
+    EdgeFlowTensor = class _EdgeFlowTensor {
+      constructor(data, shape, dtype = "float32") {
+        __publicField(this, "id");
+        __publicField(this, "dtype");
+        __publicField(this, "shape");
+        __publicField(this, "size");
+        __publicField(this, "_data");
+        __publicField(this, "_isDisposed", false);
+        validateShape(shape);
+        this.id = generateTensorId();
+        this.dtype = dtype;
+        this.shape = Object.freeze([...shape]);
+        this.size = calculateSize(this.shape);
+        const expectedSize = this.size;
+        if (data.length !== expectedSize) {
+          throw new EdgeFlowError(`Data length (${data.length}) does not match shape ${JSON.stringify(shape)} (expected ${expectedSize})`, ErrorCodes.TENSOR_SHAPE_MISMATCH, { dataLength: data.length, expectedSize, shape });
+        }
+        if (data instanceof Array) {
+          const TypedArrayCtor = getTypedArrayConstructor(dtype);
+          this._data = new TypedArrayCtor(data.length);
+          if (dtype === "int64") {
+            const bigIntData = this._data;
+            for (let i = 0; i < data.length; i++) {
+              bigIntData[i] = BigInt(Math.round(data[i] ?? 0));
+            }
+          } else {
+            for (let i = 0; i < data.length; i++) {
+              this._data[i] = data[i] ?? 0;
+            }
+          }
+        } else {
+          this._data = data;
+        }
+      }
+      get data() {
+        this.checkDisposed();
+        return this._data;
+      }
+      get isDisposed() {
+        return this._isDisposed;
+      }
+      /**
+       * Check if tensor has been disposed
+       */
+      checkDisposed() {
+        if (this._isDisposed) {
+          throw new EdgeFlowError("Cannot access disposed tensor", ErrorCodes.TENSOR_DISPOSED, { tensorId: this.id });
+        }
+      }
+      /**
+       * Convert to Float32Array
+       */
+      toFloat32Array() {
+        this.checkDisposed();
+        if (this._data instanceof Float32Array) {
+          return this._data;
+        }
+        const result = new Float32Array(this.size);
+        for (let i = 0; i < this.size; i++) {
+          result[i] = Number(this._data[i] ?? 0);
+        }
+        return result;
+      }
+      /**
+       * Convert to regular array
+       */
+      toArray() {
+        this.checkDisposed();
+        if (this.dtype === "int64") {
+          const bigIntData = this._data;
+          const result = [];
+          for (let i = 0; i < bigIntData.length; i++) {
+            result.push(Number(bigIntData[i]));
+          }
+          return result;
+        }
+        return Array.from(this._data);
+      }
+      /**
+       * Clone the tensor
+       */
+      clone() {
+        this.checkDisposed();
+        const TypedArrayCtor = this._data.constructor;
+        const clonedData = new TypedArrayCtor(this._data);
+        return new _EdgeFlowTensor(clonedData, this.shape, this.dtype);
+      }
+      /**
+       * Dispose the tensor and free memory
+       */
+      dispose() {
+        if (!this._isDisposed) {
+          this._isDisposed = true;
+          Object.assign(this, { _data: null });
+        }
+      }
+      /**
+       * Get value at specific indices
+       */
+      get(...indices) {
+        this.checkDisposed();
+        if (indices.length !== this.shape.length) {
+          throw new EdgeFlowError(`Expected ${this.shape.length} indices, got ${indices.length}`, ErrorCodes.INVALID_ARGUMENT, { expectedIndices: this.shape.length, gotIndices: indices.length });
+        }
+        let flatIndex = 0;
+        let stride = 1;
+        for (let i = this.shape.length - 1; i >= 0; i--) {
+          const idx = indices[i] ?? 0;
+          const dim = this.shape[i] ?? 1;
+          if (idx < 0 || idx >= dim) {
+            throw new EdgeFlowError(`Index ${idx} out of bounds for dimension ${i} with size ${dim}`, ErrorCodes.INVALID_ARGUMENT, { index: idx, dimension: i, size: dim });
+          }
+          flatIndex += idx * stride;
+          stride *= dim;
+        }
+        return Number(this._data[flatIndex] ?? 0);
+      }
+      /**
+       * Set value at specific indices
+       */
+      set(value, ...indices) {
+        this.checkDisposed();
+        if (indices.length !== this.shape.length) {
+          throw new EdgeFlowError(`Expected ${this.shape.length} indices, got ${indices.length}`, ErrorCodes.INVALID_ARGUMENT, { expectedIndices: this.shape.length, gotIndices: indices.length });
+        }
+        let flatIndex = 0;
+        let stride = 1;
+        for (let i = this.shape.length - 1; i >= 0; i--) {
+          const idx = indices[i] ?? 0;
+          const dim = this.shape[i] ?? 1;
+          if (idx < 0 || idx >= dim) {
+            throw new EdgeFlowError(`Index ${idx} out of bounds for dimension ${i} with size ${dim}`, ErrorCodes.INVALID_ARGUMENT, { index: idx, dimension: i, size: dim });
+          }
+          flatIndex += idx * stride;
+          stride *= dim;
+        }
+        this._data[flatIndex] = value;
+      }
+      /**
+       * Reshape the tensor (returns new tensor)
+       */
+      reshape(newShape) {
+        this.checkDisposed();
+        const newSize = calculateSize(newShape);
+        if (newSize !== this.size) {
+          throw new EdgeFlowError(`Cannot reshape tensor of size ${this.size} to shape ${JSON.stringify(newShape)} (size ${newSize})`, ErrorCodes.TENSOR_SHAPE_MISMATCH, { currentSize: this.size, newSize, newShape });
+        }
+        const TypedArrayCtor = this._data.constructor;
+        const clonedData = new TypedArrayCtor(this._data);
+        return new _EdgeFlowTensor(clonedData, newShape, this.dtype);
+      }
+      /**
+       * Transpose the tensor (2D only for now)
+       */
+      transpose() {
+        this.checkDisposed();
+        if (this.shape.length !== 2) {
+          throw new EdgeFlowError("Transpose is currently only supported for 2D tensors", ErrorCodes.NOT_IMPLEMENTED, { shape: this.shape });
+        }
+        const [rows, cols] = this.shape;
+        const result = new Float32Array(this.size);
+        for (let i = 0; i < rows; i++) {
+          for (let j = 0; j < cols; j++) {
+            result[j * rows + i] = Number(this._data[i * cols + j] ?? 0);
+          }
+        }
+        return new _EdgeFlowTensor(result, [cols, rows], this.dtype);
+      }
+      /**
+       * Create string representation
+       */
+      toString() {
+        return `Tensor(shape=[${this.shape.join(", ")}], dtype=${this.dtype})`;
+      }
+    };
+  }
+});
+
 // dist/utils/model-loader.js
 var model_loader_exports = {};
 __export(model_loader_exports, {
@@ -630,650 +1286,12 @@ var init_model_loader = __esm({
   }
 });
 
-// dist/core/types.js
-var EdgeFlowError = class extends Error {
-  constructor(message, code, details) {
-    super(message);
-    __publicField(this, "code");
-    __publicField(this, "details");
-    this.code = code;
-    this.details = details;
-    this.name = "EdgeFlowError";
-  }
-};
-var ErrorCodes = {
-  // Runtime errors
-  RUNTIME_NOT_AVAILABLE: "RUNTIME_NOT_AVAILABLE",
-  RUNTIME_INIT_FAILED: "RUNTIME_INIT_FAILED",
-  RUNTIME_NOT_INITIALIZED: "RUNTIME_NOT_INITIALIZED",
-  // Model errors
-  MODEL_NOT_FOUND: "MODEL_NOT_FOUND",
-  MODEL_LOAD_FAILED: "MODEL_LOAD_FAILED",
-  MODEL_INVALID_FORMAT: "MODEL_INVALID_FORMAT",
-  MODEL_NOT_LOADED: "MODEL_NOT_LOADED",
-  // Inference errors
-  INFERENCE_FAILED: "INFERENCE_FAILED",
-  INFERENCE_TIMEOUT: "INFERENCE_TIMEOUT",
-  INFERENCE_CANCELLED: "INFERENCE_CANCELLED",
-  // Memory errors
-  OUT_OF_MEMORY: "OUT_OF_MEMORY",
-  MEMORY_LEAK_DETECTED: "MEMORY_LEAK_DETECTED",
-  // Tensor errors
-  TENSOR_SHAPE_MISMATCH: "TENSOR_SHAPE_MISMATCH",
-  TENSOR_DTYPE_MISMATCH: "TENSOR_DTYPE_MISMATCH",
-  TENSOR_DISPOSED: "TENSOR_DISPOSED",
-  // Pipeline errors
-  PIPELINE_NOT_SUPPORTED: "PIPELINE_NOT_SUPPORTED",
-  PIPELINE_INPUT_INVALID: "PIPELINE_INPUT_INVALID",
-  // General errors
-  INVALID_ARGUMENT: "INVALID_ARGUMENT",
-  NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
-  UNKNOWN_ERROR: "UNKNOWN_ERROR"
-};
-
-// dist/core/tensor.js
-var tensorIdCounter = 0;
-function generateTensorId() {
-  return `tensor_${++tensorIdCounter}_${Date.now().toString(36)}`;
-}
-function getTypedArrayConstructor(dtype) {
-  switch (dtype) {
-    case "float32":
-      return Float32Array;
-    case "float16":
-      return Float32Array;
-    case "int32":
-      return Int32Array;
-    case "int64":
-      return BigInt64Array;
-    case "uint8":
-    case "bool":
-      return Uint8Array;
-    case "int8":
-      return Int8Array;
-    default:
-      throw new EdgeFlowError(`Unsupported data type: ${dtype}`, ErrorCodes.INVALID_ARGUMENT, { dtype });
-  }
-}
-function calculateSize(shape) {
-  if (shape.length === 0)
-    return 1;
-  return shape.reduce((acc, dim) => acc * dim, 1);
-}
-function validateShape(shape) {
-  for (let i = 0; i < shape.length; i++) {
-    const dim = shape[i];
-    if (dim === void 0 || !Number.isInteger(dim) || dim < 0) {
-      throw new EdgeFlowError(`Invalid shape dimension at index ${i}: ${dim}`, ErrorCodes.INVALID_ARGUMENT, { shape, index: i, dimension: dim });
-    }
-  }
-}
-var EdgeFlowTensor = class _EdgeFlowTensor {
-  constructor(data, shape, dtype = "float32") {
-    __publicField(this, "id");
-    __publicField(this, "dtype");
-    __publicField(this, "shape");
-    __publicField(this, "size");
-    __publicField(this, "_data");
-    __publicField(this, "_isDisposed", false);
-    validateShape(shape);
-    this.id = generateTensorId();
-    this.dtype = dtype;
-    this.shape = Object.freeze([...shape]);
-    this.size = calculateSize(this.shape);
-    const expectedSize = this.size;
-    if (data.length !== expectedSize) {
-      throw new EdgeFlowError(`Data length (${data.length}) does not match shape ${JSON.stringify(shape)} (expected ${expectedSize})`, ErrorCodes.TENSOR_SHAPE_MISMATCH, { dataLength: data.length, expectedSize, shape });
-    }
-    if (data instanceof Array) {
-      const TypedArrayCtor = getTypedArrayConstructor(dtype);
-      this._data = new TypedArrayCtor(data.length);
-      if (dtype === "int64") {
-        const bigIntData = this._data;
-        for (let i = 0; i < data.length; i++) {
-          bigIntData[i] = BigInt(Math.round(data[i] ?? 0));
-        }
-      } else {
-        for (let i = 0; i < data.length; i++) {
-          this._data[i] = data[i] ?? 0;
-        }
-      }
-    } else {
-      this._data = data;
-    }
-  }
-  get data() {
-    this.checkDisposed();
-    return this._data;
-  }
-  get isDisposed() {
-    return this._isDisposed;
-  }
-  /**
-   * Check if tensor has been disposed
-   */
-  checkDisposed() {
-    if (this._isDisposed) {
-      throw new EdgeFlowError("Cannot access disposed tensor", ErrorCodes.TENSOR_DISPOSED, { tensorId: this.id });
-    }
-  }
-  /**
-   * Convert to Float32Array
-   */
-  toFloat32Array() {
-    this.checkDisposed();
-    if (this._data instanceof Float32Array) {
-      return this._data;
-    }
-    const result = new Float32Array(this.size);
-    for (let i = 0; i < this.size; i++) {
-      result[i] = Number(this._data[i] ?? 0);
-    }
-    return result;
-  }
-  /**
-   * Convert to regular array
-   */
-  toArray() {
-    this.checkDisposed();
-    if (this.dtype === "int64") {
-      const bigIntData = this._data;
-      const result = [];
-      for (let i = 0; i < bigIntData.length; i++) {
-        result.push(Number(bigIntData[i]));
-      }
-      return result;
-    }
-    return Array.from(this._data);
-  }
-  /**
-   * Clone the tensor
-   */
-  clone() {
-    this.checkDisposed();
-    const TypedArrayCtor = this._data.constructor;
-    const clonedData = new TypedArrayCtor(this._data);
-    return new _EdgeFlowTensor(clonedData, this.shape, this.dtype);
-  }
-  /**
-   * Dispose the tensor and free memory
-   */
-  dispose() {
-    if (!this._isDisposed) {
-      this._isDisposed = true;
-      Object.assign(this, { _data: null });
-    }
-  }
-  /**
-   * Get value at specific indices
-   */
-  get(...indices) {
-    this.checkDisposed();
-    if (indices.length !== this.shape.length) {
-      throw new EdgeFlowError(`Expected ${this.shape.length} indices, got ${indices.length}`, ErrorCodes.INVALID_ARGUMENT, { expectedIndices: this.shape.length, gotIndices: indices.length });
-    }
-    let flatIndex = 0;
-    let stride = 1;
-    for (let i = this.shape.length - 1; i >= 0; i--) {
-      const idx = indices[i] ?? 0;
-      const dim = this.shape[i] ?? 1;
-      if (idx < 0 || idx >= dim) {
-        throw new EdgeFlowError(`Index ${idx} out of bounds for dimension ${i} with size ${dim}`, ErrorCodes.INVALID_ARGUMENT, { index: idx, dimension: i, size: dim });
-      }
-      flatIndex += idx * stride;
-      stride *= dim;
-    }
-    return Number(this._data[flatIndex] ?? 0);
-  }
-  /**
-   * Set value at specific indices
-   */
-  set(value, ...indices) {
-    this.checkDisposed();
-    if (indices.length !== this.shape.length) {
-      throw new EdgeFlowError(`Expected ${this.shape.length} indices, got ${indices.length}`, ErrorCodes.INVALID_ARGUMENT, { expectedIndices: this.shape.length, gotIndices: indices.length });
-    }
-    let flatIndex = 0;
-    let stride = 1;
-    for (let i = this.shape.length - 1; i >= 0; i--) {
-      const idx = indices[i] ?? 0;
-      const dim = this.shape[i] ?? 1;
-      if (idx < 0 || idx >= dim) {
-        throw new EdgeFlowError(`Index ${idx} out of bounds for dimension ${i} with size ${dim}`, ErrorCodes.INVALID_ARGUMENT, { index: idx, dimension: i, size: dim });
-      }
-      flatIndex += idx * stride;
-      stride *= dim;
-    }
-    this._data[flatIndex] = value;
-  }
-  /**
-   * Reshape the tensor (returns new tensor)
-   */
-  reshape(newShape) {
-    this.checkDisposed();
-    const newSize = calculateSize(newShape);
-    if (newSize !== this.size) {
-      throw new EdgeFlowError(`Cannot reshape tensor of size ${this.size} to shape ${JSON.stringify(newShape)} (size ${newSize})`, ErrorCodes.TENSOR_SHAPE_MISMATCH, { currentSize: this.size, newSize, newShape });
-    }
-    const TypedArrayCtor = this._data.constructor;
-    const clonedData = new TypedArrayCtor(this._data);
-    return new _EdgeFlowTensor(clonedData, newShape, this.dtype);
-  }
-  /**
-   * Transpose the tensor (2D only for now)
-   */
-  transpose() {
-    this.checkDisposed();
-    if (this.shape.length !== 2) {
-      throw new EdgeFlowError("Transpose is currently only supported for 2D tensors", ErrorCodes.NOT_IMPLEMENTED, { shape: this.shape });
-    }
-    const [rows, cols] = this.shape;
-    const result = new Float32Array(this.size);
-    for (let i = 0; i < rows; i++) {
-      for (let j = 0; j < cols; j++) {
-        result[j * rows + i] = Number(this._data[i * cols + j] ?? 0);
-      }
-    }
-    return new _EdgeFlowTensor(result, [cols, rows], this.dtype);
-  }
-  /**
-   * Create string representation
-   */
-  toString() {
-    return `Tensor(shape=[${this.shape.join(", ")}], dtype=${this.dtype})`;
-  }
-};
-function tensor(data, shape, dtype = "float32") {
-  if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0])) {
-    const rows = data.length;
-    const cols = data[0].length;
-    const flatData = [];
-    for (const row of data) {
-      if (row.length !== cols) {
-        throw new EdgeFlowError("Nested arrays must have consistent dimensions", ErrorCodes.INVALID_ARGUMENT);
-      }
-      flatData.push(...row);
-    }
-    return new EdgeFlowTensor(flatData, shape ?? [rows, cols], dtype);
-  }
-  const inferredShape = shape ?? [data.length];
-  return new EdgeFlowTensor(data, inferredShape, dtype);
-}
-function zeros(shape, dtype = "float32") {
-  const size = calculateSize(shape);
-  const TypedArrayCtor = getTypedArrayConstructor(dtype);
-  const data = new TypedArrayCtor(size);
-  return new EdgeFlowTensor(data, shape, dtype);
-}
-function ones(shape, dtype = "float32") {
-  const size = calculateSize(shape);
-  const TypedArrayCtor = getTypedArrayConstructor(dtype);
-  const data = new TypedArrayCtor(size);
-  data.fill(1);
-  return new EdgeFlowTensor(data, shape, dtype);
-}
-function full(shape, value, dtype = "float32") {
-  const size = calculateSize(shape);
-  const TypedArrayCtor = getTypedArrayConstructor(dtype);
-  const data = new TypedArrayCtor(size);
-  data.fill(value);
-  return new EdgeFlowTensor(data, shape, dtype);
-}
-function random(shape, dtype = "float32") {
-  const size = calculateSize(shape);
-  const data = new Float32Array(size);
-  for (let i = 0; i < size; i++) {
-    data[i] = Math.random();
-  }
-  return new EdgeFlowTensor(data, shape, dtype);
-}
-function randn(shape, dtype = "float32") {
-  const size = calculateSize(shape);
-  const data = new Float32Array(size);
-  for (let i = 0; i < size; i += 2) {
-    const u1 = Math.random();
-    const u2 = Math.random();
-    const r = Math.sqrt(-2 * Math.log(u1));
-    const theta = 2 * Math.PI * u2;
-    data[i] = r * Math.cos(theta);
-    if (i + 1 < size) {
-      data[i + 1] = r * Math.sin(theta);
-    }
-  }
-  return new EdgeFlowTensor(data, shape, dtype);
-}
-function arange(start, stop, step = 1, dtype = "float32") {
-  if (stop === void 0) {
-    stop = start;
-    start = 0;
-  }
-  const size = Math.ceil((stop - start) / step);
-  const data = new Float32Array(size);
-  for (let i = 0; i < size; i++) {
-    data[i] = start + i * step;
-  }
-  return new EdgeFlowTensor(data, [size], dtype);
-}
-function linspace(start, stop, num = 50, dtype = "float32") {
-  const data = new Float32Array(num);
-  const step = (stop - start) / (num - 1);
-  for (let i = 0; i < num; i++) {
-    data[i] = start + i * step;
-  }
-  return new EdgeFlowTensor(data, [num], dtype);
-}
-function eye(n, dtype = "float32") {
-  const data = new Float32Array(n * n);
-  for (let i = 0; i < n; i++) {
-    data[i * n + i] = 1;
-  }
-  return new EdgeFlowTensor(data, [n, n], dtype);
-}
-function add(a, b) {
-  if (typeof b === "number") {
-    const result2 = new Float32Array(a.size);
-    const aData2 = a.toFloat32Array();
-    for (let i = 0; i < a.size; i++) {
-      result2[i] = (aData2[i] ?? 0) + b;
-    }
-    return new EdgeFlowTensor(result2, a.shape, a.dtype);
-  }
-  if (a.size !== b.size) {
-    throw new EdgeFlowError("Tensor sizes must match for element-wise operations", ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
-  }
-  const result = new Float32Array(a.size);
-  const aData = a.toFloat32Array();
-  const bData = b.toFloat32Array();
-  for (let i = 0; i < a.size; i++) {
-    result[i] = (aData[i] ?? 0) + (bData[i] ?? 0);
-  }
-  return new EdgeFlowTensor(result, a.shape, a.dtype);
-}
-function sub(a, b) {
-  if (typeof b === "number") {
-    const result2 = new Float32Array(a.size);
-    const aData2 = a.toFloat32Array();
-    for (let i = 0; i < a.size; i++) {
-      result2[i] = (aData2[i] ?? 0) - b;
-    }
-    return new EdgeFlowTensor(result2, a.shape, a.dtype);
-  }
-  if (a.size !== b.size) {
-    throw new EdgeFlowError("Tensor sizes must match for element-wise operations", ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
-  }
-  const result = new Float32Array(a.size);
-  const aData = a.toFloat32Array();
-  const bData = b.toFloat32Array();
-  for (let i = 0; i < a.size; i++) {
-    result[i] = (aData[i] ?? 0) - (bData[i] ?? 0);
-  }
-  return new EdgeFlowTensor(result, a.shape, a.dtype);
-}
-function mul(a, b) {
-  if (typeof b === "number") {
-    const result2 = new Float32Array(a.size);
-    const aData2 = a.toFloat32Array();
-    for (let i = 0; i < a.size; i++) {
-      result2[i] = (aData2[i] ?? 0) * b;
-    }
-    return new EdgeFlowTensor(result2, a.shape, a.dtype);
-  }
-  if (a.size !== b.size) {
-    throw new EdgeFlowError("Tensor sizes must match for element-wise operations", ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
-  }
-  const result = new Float32Array(a.size);
-  const aData = a.toFloat32Array();
-  const bData = b.toFloat32Array();
-  for (let i = 0; i < a.size; i++) {
-    result[i] = (aData[i] ?? 0) * (bData[i] ?? 0);
-  }
-  return new EdgeFlowTensor(result, a.shape, a.dtype);
-}
-function div(a, b) {
-  if (typeof b === "number") {
-    const result2 = new Float32Array(a.size);
-    const aData2 = a.toFloat32Array();
-    for (let i = 0; i < a.size; i++) {
-      result2[i] = (aData2[i] ?? 0) / b;
-    }
-    return new EdgeFlowTensor(result2, a.shape, a.dtype);
-  }
-  if (a.size !== b.size) {
-    throw new EdgeFlowError("Tensor sizes must match for element-wise operations", ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
-  }
-  const result = new Float32Array(a.size);
-  const aData = a.toFloat32Array();
-  const bData = b.toFloat32Array();
-  for (let i = 0; i < a.size; i++) {
-    result[i] = (aData[i] ?? 0) / (bData[i] ?? 0);
-  }
-  return new EdgeFlowTensor(result, a.shape, a.dtype);
-}
-function matmul(a, b) {
-  if (a.shape.length !== 2 || b.shape.length !== 2) {
-    throw new EdgeFlowError("matmul requires 2D tensors", ErrorCodes.INVALID_ARGUMENT, { aShape: a.shape, bShape: b.shape });
-  }
-  const [m, k1] = a.shape;
-  const [k2, n] = b.shape;
-  if (k1 !== k2) {
-    throw new EdgeFlowError(`Matrix dimensions incompatible for multiplication: (${m}x${k1}) @ (${k2}x${n})`, ErrorCodes.TENSOR_SHAPE_MISMATCH, { aShape: a.shape, bShape: b.shape });
-  }
-  const result = new Float32Array(m * n);
-  const aData = a.toFloat32Array();
-  const bData = b.toFloat32Array();
-  for (let i = 0; i < m; i++) {
-    for (let j = 0; j < n; j++) {
-      let sum2 = 0;
-      for (let k = 0; k < k1; k++) {
-        sum2 += (aData[i * k1 + k] ?? 0) * (bData[k * n + j] ?? 0);
-      }
-      result[i * n + j] = sum2;
-    }
-  }
-  return new EdgeFlowTensor(result, [m, n], a.dtype);
-}
-function softmax(t, axis = -1) {
-  const data = t.toFloat32Array();
-  const result = new Float32Array(t.size);
-  const actualAxis = axis < 0 ? t.shape.length + axis : axis;
-  if (actualAxis < 0 || actualAxis >= t.shape.length) {
-    throw new EdgeFlowError(`Invalid axis ${axis} for tensor with ${t.shape.length} dimensions`, ErrorCodes.INVALID_ARGUMENT, { axis, shape: t.shape });
-  }
-  if (t.shape.length === 1) {
-    let max = -Infinity;
-    for (let i = 0; i < t.size; i++) {
-      if ((data[i] ?? 0) > max)
-        max = data[i] ?? 0;
-    }
-    let sum2 = 0;
-    for (let i = 0; i < t.size; i++) {
-      result[i] = Math.exp((data[i] ?? 0) - max);
-      sum2 += result[i] ?? 0;
-    }
-    for (let i = 0; i < t.size; i++) {
-      result[i] = (result[i] ?? 0) / sum2;
-    }
-    return new EdgeFlowTensor(result, t.shape, t.dtype);
-  }
-  if (t.shape.length === 2 && actualAxis === 1) {
-    const [rows, cols] = t.shape;
-    for (let i = 0; i < rows; i++) {
-      let max = -Infinity;
-      for (let j = 0; j < cols; j++) {
-        if ((data[i * cols + j] ?? 0) > max)
-          max = data[i * cols + j] ?? 0;
-      }
-      let sum2 = 0;
-      for (let j = 0; j < cols; j++) {
-        result[i * cols + j] = Math.exp((data[i * cols + j] ?? 0) - max);
-        sum2 += result[i * cols + j] ?? 0;
-      }
-      for (let j = 0; j < cols; j++) {
-        result[i * cols + j] = (result[i * cols + j] ?? 0) / sum2;
-      }
-    }
-    return new EdgeFlowTensor(result, t.shape, t.dtype);
-  }
-  throw new EdgeFlowError("Softmax currently only supports 1D tensors or 2D tensors along the last axis", ErrorCodes.NOT_IMPLEMENTED, { shape: t.shape, axis });
-}
-function relu(t) {
-  const data = t.toFloat32Array();
-  const result = new Float32Array(t.size);
-  for (let i = 0; i < t.size; i++) {
-    result[i] = Math.max(0, data[i] ?? 0);
-  }
-  return new EdgeFlowTensor(result, t.shape, t.dtype);
-}
-function sigmoid(t) {
-  const data = t.toFloat32Array();
-  const result = new Float32Array(t.size);
-  for (let i = 0; i < t.size; i++) {
-    result[i] = 1 / (1 + Math.exp(-(data[i] ?? 0)));
-  }
-  return new EdgeFlowTensor(result, t.shape, t.dtype);
-}
-function tanh(t) {
-  const data = t.toFloat32Array();
-  const result = new Float32Array(t.size);
-  for (let i = 0; i < t.size; i++) {
-    result[i] = Math.tanh(data[i] ?? 0);
-  }
-  return new EdgeFlowTensor(result, t.shape, t.dtype);
-}
-function sum(t, axis) {
-  const data = t.toFloat32Array();
-  if (axis === void 0) {
-    let total = 0;
-    for (let i = 0; i < t.size; i++) {
-      total += data[i] ?? 0;
-    }
-    return total;
-  }
-  const actualAxis = axis < 0 ? t.shape.length + axis : axis;
-  if (actualAxis < 0 || actualAxis >= t.shape.length) {
-    throw new EdgeFlowError(`Invalid axis ${axis} for tensor with ${t.shape.length} dimensions`, ErrorCodes.INVALID_ARGUMENT, { axis, shape: t.shape });
-  }
-  const newShape = [...t.shape];
-  newShape.splice(actualAxis, 1);
-  if (newShape.length === 0) {
-    let total = 0;
-    for (let i = 0; i < t.size; i++) {
-      total += data[i] ?? 0;
-    }
-    return total;
-  }
-  if (t.shape.length === 2) {
-    const [rows, cols] = t.shape;
-    if (actualAxis === 0) {
-      const result = new Float32Array(cols);
-      for (let j = 0; j < cols; j++) {
-        for (let i = 0; i < rows; i++) {
-          result[j] = (result[j] ?? 0) + (data[i * cols + j] ?? 0);
-        }
-      }
-      return new EdgeFlowTensor(result, [cols], t.dtype);
-    } else {
-      const result = new Float32Array(rows);
-      for (let i = 0; i < rows; i++) {
-        for (let j = 0; j < cols; j++) {
-          result[i] = (result[i] ?? 0) + (data[i * cols + j] ?? 0);
-        }
-      }
-      return new EdgeFlowTensor(result, [rows], t.dtype);
-    }
-  }
-  throw new EdgeFlowError("Sum along axis currently only supports up to 2D tensors", ErrorCodes.NOT_IMPLEMENTED, { shape: t.shape, axis });
-}
-function mean(t, axis) {
-  if (axis === void 0) {
-    return sum(t) / t.size;
-  }
-  const result = sum(t, axis);
-  if (typeof result === "number") {
-    return result / (t.shape[axis] ?? 1);
-  }
-  const axisSize = t.shape[axis] ?? 1;
-  return div(result, axisSize);
-}
-function argmax(t, axis) {
-  const data = t.toFloat32Array();
-  if (axis === void 0) {
-    let maxIdx = 0;
-    let maxVal = data[0] ?? -Infinity;
-    for (let i = 1; i < t.size; i++) {
-      if ((data[i] ?? -Infinity) > maxVal) {
-        maxVal = data[i] ?? -Infinity;
-        maxIdx = i;
-      }
-    }
-    return maxIdx;
-  }
-  const actualAxis = axis < 0 ? t.shape.length + axis : axis;
-  if (t.shape.length === 2 && actualAxis === 1) {
-    const [rows, cols] = t.shape;
-    const result = new Float32Array(rows);
-    for (let i = 0; i < rows; i++) {
-      let maxIdx = 0;
-      let maxVal = data[i * cols] ?? -Infinity;
-      for (let j = 1; j < cols; j++) {
-        if ((data[i * cols + j] ?? -Infinity) > maxVal) {
-          maxVal = data[i * cols + j] ?? -Infinity;
-          maxIdx = j;
-        }
-      }
-      result[i] = maxIdx;
-    }
-    return new EdgeFlowTensor(result, [rows], "int32");
-  }
-  throw new EdgeFlowError("Argmax along axis currently only supports 2D tensors along the last axis", ErrorCodes.NOT_IMPLEMENTED, { shape: t.shape, axis });
-}
-function concat(tensors, axis = 0) {
-  if (tensors.length === 0) {
-    throw new EdgeFlowError("Cannot concatenate empty array of tensors", ErrorCodes.INVALID_ARGUMENT);
-  }
-  if (tensors.length === 1) {
-    return tensors[0]?.clone() ?? zeros([0]);
-  }
-  const first = tensors[0];
-  if (!first) {
-    throw new EdgeFlowError("First tensor is undefined", ErrorCodes.INVALID_ARGUMENT);
-  }
-  const actualAxis = axis < 0 ? first.shape.length + axis : axis;
-  for (let i = 1; i < tensors.length; i++) {
-    const t = tensors[i];
-    if (!t)
-      continue;
-    if (t.shape.length !== first.shape.length) {
-      throw new EdgeFlowError("All tensors must have the same number of dimensions", ErrorCodes.TENSOR_SHAPE_MISMATCH);
-    }
-    for (let j = 0; j < first.shape.length; j++) {
-      if (j !== actualAxis && first.shape[j] !== t.shape[j]) {
-        throw new EdgeFlowError(`Shape mismatch at dimension ${j}`, ErrorCodes.TENSOR_SHAPE_MISMATCH);
-      }
-    }
-  }
-  const newShape = [...first.shape];
-  let totalAxisSize = 0;
-  for (const t of tensors) {
-    if (t)
-      totalAxisSize += t.shape[actualAxis] ?? 0;
-  }
-  newShape[actualAxis] = totalAxisSize;
-  if (first.shape.length === 1) {
-    const result = new Float32Array(totalAxisSize);
-    let offset = 0;
-    for (const t of tensors) {
-      if (!t)
-        continue;
-      result.set(t.toFloat32Array(), offset);
-      offset += t.size;
-    }
-    return new EdgeFlowTensor(result, newShape, first.dtype);
-  }
-  throw new EdgeFlowError("Concatenation currently only supports 1D tensors", ErrorCodes.NOT_IMPLEMENTED);
-}
+// dist/index.js
+init_types();
+init_tensor();
 
 // dist/core/scheduler.js
+init_types();
 var Task = class {
   constructor(id, modelId, priority, executor) {
     __publicField(this, "id");
@@ -2230,6 +2248,7 @@ function gc() {
 }
 
 // dist/core/runtime.js
+init_types();
 var runtimeFactories = /* @__PURE__ */ new Map();
 var runtimeInstances = /* @__PURE__ */ new Map();
 var RUNTIME_PRIORITY = ["webgpu", "webnn", "wasm"];
@@ -2489,6 +2508,8 @@ async function getAvailableRuntimes() {
 }
 
 // dist/backends/webgpu.js
+init_types();
+init_tensor();
 var GPUBufferUsage = {
   STORAGE: 128,
   COPY_SRC: 4,
@@ -2758,6 +2779,8 @@ function createWebGPURuntime() {
 }
 
 // dist/backends/webnn.js
+init_types();
+init_tensor();
 var WebNNRuntime = class {
   constructor() {
     __publicField(this, "name", "webnn");
@@ -2927,6 +2950,8 @@ function createWebNNRuntime() {
 }
 
 // dist/backends/wasm.js
+init_types();
+init_tensor();
 var WASMRuntime = class {
   constructor() {
     __publicField(this, "name", "wasm");
@@ -3269,6 +3294,8 @@ function createWASMRuntime() {
 }
 
 // dist/backends/onnx.js
+init_types();
+init_tensor();
 var ONNX_VERSION = "1.17.0";
 var ONNX_CDN_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNX_VERSION}/dist/`;
 var ONNX_SCRIPT_URL = `${ONNX_CDN_BASE}ort.min.js`;
@@ -3985,7 +4012,11 @@ var IMAGENET_LABELS = [
   "ostrich"
 ];
 
+// dist/pipelines/text-classification.js
+init_tensor();
+
 // dist/utils/tokenizer.js
+init_types();
 var Tokenizer = class _Tokenizer {
   constructor() {
     __publicField(this, "vocab", /* @__PURE__ */ new Map());
@@ -4661,6 +4692,7 @@ registerPipeline("text-classification", (config) => new TextClassificationPipeli
 registerPipeline("sentiment-analysis", (config) => new SentimentAnalysisPipeline(config));
 
 // dist/pipelines/feature-extraction.js
+init_tensor();
 var FeatureExtractionPipeline = class extends BasePipeline {
   constructor(config, embeddingDim = 768) {
     super(config);
@@ -4827,7 +4859,11 @@ function createFeatureExtractionPipeline(config = {}) {
 }
 registerPipeline("feature-extraction", (config) => new FeatureExtractionPipeline(config));
 
+// dist/pipelines/image-classification.js
+init_tensor();
+
 // dist/utils/preprocessor.js
+init_tensor();
 var DEFAULT_IMAGE_OPTIONS = {
   width: 224,
   height: 224,
@@ -5526,6 +5562,7 @@ function createImageClassificationPipeline(config = {}, labels) {
 registerPipeline("image-classification", (config) => new ImageClassificationPipeline(config));
 
 // dist/pipelines/text-generation.js
+init_tensor();
 var TextGenerationPipeline = class extends BasePipeline {
   // GPT-2 default
   constructor(config) {
@@ -5778,6 +5815,7 @@ var TextGenerationPipeline = class extends BasePipeline {
 };
 
 // dist/pipelines/object-detection.js
+init_tensor();
 var COCO_LABELS = [
   "person",
   "bicycle",
@@ -6033,6 +6071,7 @@ var ObjectDetectionPipeline = class extends BasePipeline {
 };
 
 // dist/pipelines/automatic-speech-recognition.js
+init_tensor();
 var AutomaticSpeechRecognitionPipeline = class extends BasePipeline {
   constructor(config) {
     super(config ?? {
@@ -6176,6 +6215,7 @@ var AutomaticSpeechRecognitionPipeline = class extends BasePipeline {
 };
 
 // dist/pipelines/zero-shot-classification.js
+init_tensor();
 var ZeroShotClassificationPipeline = class extends BasePipeline {
   constructor(config) {
     super(config ?? {
@@ -6287,6 +6327,7 @@ var ZeroShotClassificationPipeline = class extends BasePipeline {
 };
 
 // dist/pipelines/question-answering.js
+init_tensor();
 var QuestionAnsweringPipeline = class extends BasePipeline {
   constructor(config) {
     super(config ?? {
@@ -6487,6 +6528,7 @@ init_model_loader();
 
 // dist/utils/hub.js
 init_model_loader();
+init_types();
 var DEFAULT_ENDPOINT = "https://huggingface.co";
 var DEFAULT_REVISION = "main";
 var ONNX_MODEL_FILES = [
@@ -6702,6 +6744,2226 @@ async function fromTask(task, options = {}) {
   return downloadModel(modelId, options);
 }
 
+// dist/tools/benchmark.js
+async function benchmark(fn, options = {}) {
+  const { warmupRuns = 3, runs = 10, verbose = false, timeout = 3e4, name = "benchmark" } = options;
+  const times = [];
+  let failedRuns = 0;
+  if (verbose)
+    console.log(`[${name}] Running ${warmupRuns} warmup iterations...`);
+  for (let i = 0; i < warmupRuns; i++) {
+    try {
+      await Promise.race([
+        Promise.resolve(fn()),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), timeout))
+      ]);
+    } catch {
+    }
+  }
+  if (verbose)
+    console.log(`[${name}] Running ${runs} measured iterations...`);
+  for (let i = 0; i < runs; i++) {
+    try {
+      const start = performance.now();
+      await Promise.race([
+        Promise.resolve(fn()),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), timeout))
+      ]);
+      const end = performance.now();
+      times.push(end - start);
+      if (verbose)
+        console.log(`  Run ${i + 1}: ${(end - start).toFixed(2)}ms`);
+    } catch (error) {
+      failedRuns++;
+      if (verbose)
+        console.log(`  Run ${i + 1}: FAILED - ${error}`);
+    }
+  }
+  if (times.length === 0) {
+    throw new Error(`All ${runs} runs failed`);
+  }
+  const sorted = [...times].sort((a, b) => a - b);
+  const sum2 = times.reduce((a, b) => a + b, 0);
+  const avg = sum2 / times.length;
+  const variance = times.reduce((sum3, t) => sum3 + Math.pow(t - avg, 2), 0) / times.length;
+  const stdDev = Math.sqrt(variance);
+  const result = {
+    name,
+    avgTime: avg,
+    medianTime: sorted[Math.floor(sorted.length / 2)] ?? 0,
+    minTime: sorted[0] ?? 0,
+    maxTime: sorted[sorted.length - 1] ?? 0,
+    stdDev,
+    p95: sorted[Math.floor(sorted.length * 0.95)] ?? sorted[sorted.length - 1] ?? 0,
+    p99: sorted[Math.floor(sorted.length * 0.99)] ?? sorted[sorted.length - 1] ?? 0,
+    throughput: 1e3 / avg,
+    times,
+    totalRuns: runs,
+    failedRuns
+  };
+  if (verbose) {
+    console.log(`
+[${name}] Results:`);
+    console.log(`  Avg: ${result.avgTime.toFixed(2)}ms`);
+    console.log(`  Median: ${result.medianTime.toFixed(2)}ms`);
+    console.log(`  Min: ${result.minTime.toFixed(2)}ms`);
+    console.log(`  Max: ${result.maxTime.toFixed(2)}ms`);
+    console.log(`  Std Dev: ${result.stdDev.toFixed(2)}ms`);
+    console.log(`  P95: ${result.p95.toFixed(2)}ms`);
+    console.log(`  Throughput: ${result.throughput.toFixed(2)} ops/sec`);
+  }
+  return result;
+}
+async function compareBenchmarks(baseline, comparison, options = {}) {
+  const baselineResult = await benchmark(baseline, {
+    ...options,
+    name: options.name ? `${options.name} (baseline)` : "baseline"
+  });
+  const comparisonResult = await benchmark(comparison, {
+    ...options,
+    name: options.name ? `${options.name} (comparison)` : "comparison"
+  });
+  const speedup = baselineResult.avgTime / comparisonResult.avgTime;
+  const percentFaster = (baselineResult.avgTime - comparisonResult.avgTime) / baselineResult.avgTime * 100;
+  let winner;
+  if (Math.abs(percentFaster) < 5) {
+    winner = "tie";
+  } else if (percentFaster > 0) {
+    winner = "comparison";
+  } else {
+    winner = "baseline";
+  }
+  return {
+    baseline: baselineResult,
+    comparison: comparisonResult,
+    speedup,
+    percentFaster,
+    winner
+  };
+}
+async function benchmarkSuite(suite, options = {}) {
+  const results = {};
+  for (const [name, fn] of Object.entries(suite)) {
+    console.log(`
+=== ${name} ===`);
+    results[name] = await benchmark(fn, { ...options, name, verbose: true });
+  }
+  return results;
+}
+function formatBenchmarkResult(result) {
+  return `
+\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510
+\u2502 ${result.name.padEnd(39)} \u2502
+\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 Avg Time:    ${result.avgTime.toFixed(2).padStart(10)}ms             \u2502
+\u2502 Median:      ${result.medianTime.toFixed(2).padStart(10)}ms             \u2502
+\u2502 Min Time:    ${result.minTime.toFixed(2).padStart(10)}ms             \u2502
+\u2502 Max Time:    ${result.maxTime.toFixed(2).padStart(10)}ms             \u2502
+\u2502 Std Dev:     ${result.stdDev.toFixed(2).padStart(10)}ms             \u2502
+\u2502 P95:         ${result.p95.toFixed(2).padStart(10)}ms             \u2502
+\u2502 P99:         ${result.p99.toFixed(2).padStart(10)}ms             \u2502
+\u2502 Throughput:  ${result.throughput.toFixed(2).padStart(10)} ops/sec     \u2502
+\u2502 Runs:        ${result.totalRuns.toString().padStart(10)} (${result.failedRuns} failed)  \u2502
+\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518
+  `.trim();
+}
+function formatComparisonResult(result) {
+  const arrow = result.percentFaster > 0 ? "\u2191" : result.percentFaster < 0 ? "\u2193" : "=";
+  const winnerText = result.winner === "comparison" ? "Comparison is faster!" : result.winner === "baseline" ? "Baseline is faster!" : "Results are similar";
+  return `
+\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510
+\u2502                  BENCHMARK COMPARISON               \u2502
+\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 Baseline:    ${result.baseline.avgTime.toFixed(2).padStart(10)}ms                       \u2502
+\u2502 Comparison:  ${result.comparison.avgTime.toFixed(2).padStart(10)}ms                       \u2502
+\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 Speedup:     ${result.speedup.toFixed(2).padStart(10)}x                        \u2502
+\u2502 Difference:  ${arrow} ${Math.abs(result.percentFaster).toFixed(1).padStart(8)}%                      \u2502
+\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524
+\u2502 Winner: ${winnerText.padEnd(42)} \u2502
+\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518
+  `.trim();
+}
+async function benchmarkMemory(fn, options = {}) {
+  const { name = "memory-benchmark", runs = 5 } = options;
+  const getMemory = () => {
+    if (typeof performance !== "undefined" && "memory" in performance) {
+      return performance.memory.usedJSHeapSize;
+    }
+    return 0;
+  };
+  const memoryReadings = [];
+  const initialMemory = getMemory();
+  for (let i = 0; i < runs; i++) {
+    await fn();
+    memoryReadings.push(getMemory());
+  }
+  const peakMemory = Math.max(...memoryReadings);
+  const avgMemory = memoryReadings.reduce((a, b) => a + b, 0) / memoryReadings.length;
+  const memoryDelta = avgMemory - initialMemory;
+  return {
+    name,
+    peakMemory,
+    avgMemory,
+    memoryDelta
+  };
+}
+
+// dist/core/index.js
+init_types();
+init_tensor();
+
+// dist/tools/quantization.js
+function calculateQuantParams(data, bits, symmetric, perChannel, channelAxis = 0, shape = []) {
+  const qmin = symmetric ? -(1 << bits - 1) : 0;
+  const qmax = symmetric ? (1 << bits - 1) - 1 : (1 << bits) - 1;
+  if (perChannel && shape.length > 1) {
+    const numChannels = shape[channelAxis] ?? 1;
+    const scales = new Float32Array(numChannels);
+    const zeroPoints = new Int32Array(numChannels);
+    const channelSize = data.length / numChannels;
+    let globalMin = Infinity;
+    let globalMax = -Infinity;
+    for (let c = 0; c < numChannels; c++) {
+      let min = Infinity;
+      let max = -Infinity;
+      for (let i = 0; i < channelSize; i++) {
+        const idx = c * channelSize + i;
+        const val = data[idx] ?? 0;
+        min = Math.min(min, val);
+        max = Math.max(max, val);
+      }
+      globalMin = Math.min(globalMin, min);
+      globalMax = Math.max(globalMax, max);
+      if (symmetric) {
+        const absMax = Math.max(Math.abs(min), Math.abs(max));
+        scales[c] = absMax / qmax;
+        zeroPoints[c] = 0;
+      } else {
+        scales[c] = (max - min) / (qmax - qmin);
+        zeroPoints[c] = Math.round(qmin - min / (scales[c] || 1));
+      }
+      if (scales[c] === 0)
+        scales[c] = 1;
+    }
+    return { scale: scales, zeroPoint: zeroPoints, min: globalMin, max: globalMax };
+  } else {
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < data.length; i++) {
+      const val = data[i] ?? 0;
+      min = Math.min(min, val);
+      max = Math.max(max, val);
+    }
+    let scale;
+    let zeroPoint;
+    if (symmetric) {
+      const absMax = Math.max(Math.abs(min), Math.abs(max));
+      scale = absMax / qmax;
+      zeroPoint = 0;
+    } else {
+      scale = (max - min) / (qmax - qmin);
+      zeroPoint = Math.round(qmin - min / (scale || 1));
+    }
+    if (scale === 0)
+      scale = 1;
+    return { scale, zeroPoint, min, max };
+  }
+}
+function quantizeToInt8(data, scale, zeroPoint, perChannel, channelSize = data.length) {
+  const result = new Int8Array(data.length);
+  if (perChannel && scale instanceof Float32Array) {
+    const numChannels = scale.length;
+    for (let c = 0; c < numChannels; c++) {
+      const s = scale[c] ?? 1;
+      const zp = zeroPoint[c] ?? 0;
+      for (let i = 0; i < channelSize; i++) {
+        const idx = c * channelSize + i;
+        const val = data[idx] ?? 0;
+        result[idx] = Math.max(-128, Math.min(127, Math.round(val / s + zp)));
+      }
+    }
+  } else {
+    const s = scale;
+    const zp = zeroPoint;
+    for (let i = 0; i < data.length; i++) {
+      const val = data[i] ?? 0;
+      result[i] = Math.max(-128, Math.min(127, Math.round(val / s + zp)));
+    }
+  }
+  return result;
+}
+function quantizeToUint8(data, scale, zeroPoint, perChannel, channelSize = data.length) {
+  const result = new Uint8Array(data.length);
+  if (perChannel && scale instanceof Float32Array) {
+    const numChannels = scale.length;
+    for (let c = 0; c < numChannels; c++) {
+      const s = scale[c] ?? 1;
+      const zp = zeroPoint[c] ?? 0;
+      for (let i = 0; i < channelSize; i++) {
+        const idx = c * channelSize + i;
+        const val = data[idx] ?? 0;
+        result[idx] = Math.max(0, Math.min(255, Math.round(val / s + zp)));
+      }
+    }
+  } else {
+    const s = scale;
+    const zp = zeroPoint;
+    for (let i = 0; i < data.length; i++) {
+      const val = data[i] ?? 0;
+      result[i] = Math.max(0, Math.min(255, Math.round(val / s + zp)));
+    }
+  }
+  return result;
+}
+function quantizeToInt4(data, scale, zeroPoint) {
+  const packedLength = Math.ceil(data.length / 2);
+  const result = new Uint8Array(packedLength);
+  for (let i = 0; i < data.length; i += 2) {
+    const val1 = data[i] ?? 0;
+    const val2 = data[i + 1] ?? 0;
+    const q1 = Math.max(0, Math.min(15, Math.round(val1 / scale + zeroPoint + 8)));
+    const q2 = Math.max(0, Math.min(15, Math.round(val2 / scale + zeroPoint + 8)));
+    result[i >> 1] = q1 << 4 | q2;
+  }
+  return result;
+}
+function quantizeToFloat16(data) {
+  const result = new Uint16Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    result[i] = float32ToFloat16(data[i] ?? 0);
+  }
+  return result;
+}
+function float32ToFloat16(value) {
+  const float32View = new Float32Array(1);
+  const int32View = new Int32Array(float32View.buffer);
+  float32View[0] = value;
+  const f = int32View[0];
+  const sign = f >> 16 & 32768;
+  const exponent = (f >> 23 & 255) - 127 + 15;
+  const mantissa = f & 8388607;
+  if (exponent <= 0) {
+    if (exponent < -10) {
+      return sign;
+    }
+    const m = (mantissa | 8388608) >> 1 - exponent;
+    return sign | m >> 13;
+  } else if (exponent >= 31) {
+    return sign | 31744;
+  }
+  return sign | exponent << 10 | mantissa >> 13;
+}
+function dequantizeInt8(data, scale, zeroPoint, perChannel = false, channelSize = data.length) {
+  const result = new Float32Array(data.length);
+  if (perChannel && scale instanceof Float32Array) {
+    const numChannels = scale.length;
+    for (let c = 0; c < numChannels; c++) {
+      const s = scale[c] ?? 1;
+      const zp = zeroPoint[c] ?? 0;
+      for (let i = 0; i < channelSize; i++) {
+        const idx = c * channelSize + i;
+        result[idx] = ((data[idx] ?? 0) - zp) * s;
+      }
+    }
+  } else {
+    const s = scale;
+    const zp = zeroPoint;
+    for (let i = 0; i < data.length; i++) {
+      result[i] = ((data[i] ?? 0) - zp) * s;
+    }
+  }
+  return result;
+}
+function dequantizeUint8(data, scale, zeroPoint, perChannel = false, channelSize = data.length) {
+  const result = new Float32Array(data.length);
+  if (perChannel && scale instanceof Float32Array) {
+    const numChannels = scale.length;
+    for (let c = 0; c < numChannels; c++) {
+      const s = scale[c] ?? 1;
+      const zp = zeroPoint[c] ?? 0;
+      for (let i = 0; i < channelSize; i++) {
+        const idx = c * channelSize + i;
+        result[idx] = ((data[idx] ?? 0) - zp) * s;
+      }
+    }
+  } else {
+    const s = scale;
+    const zp = zeroPoint;
+    for (let i = 0; i < data.length; i++) {
+      result[i] = ((data[i] ?? 0) - zp) * s;
+    }
+  }
+  return result;
+}
+function float16ToFloat32(value) {
+  const sign = (value & 32768) >> 15;
+  const exponent = (value & 31744) >> 10;
+  const mantissa = value & 1023;
+  if (exponent === 0) {
+    if (mantissa === 0) {
+      return sign === 0 ? 0 : -0;
+    }
+    return (sign === 0 ? 1 : -1) * Math.pow(2, -14) * (mantissa / 1024);
+  } else if (exponent === 31) {
+    if (mantissa === 0) {
+      return sign === 0 ? Infinity : -Infinity;
+    }
+    return NaN;
+  }
+  return (sign === 0 ? 1 : -1) * Math.pow(2, exponent - 15) * (1 + mantissa / 1024);
+}
+function dequantizeFloat16(data) {
+  const result = new Float32Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    result[i] = float16ToFloat32(data[i] ?? 0);
+  }
+  return result;
+}
+function parseModelWeights(modelData) {
+  const weights = [];
+  const float32Array = new Float32Array(modelData);
+  weights.push({
+    name: "model_weights",
+    data: float32Array,
+    shape: [float32Array.length],
+    dtype: "float32"
+  });
+  return weights;
+}
+function serializeQuantizedModel(model) {
+  const encoder = new TextEncoder();
+  let totalSize = 20;
+  for (const weight of model.weights) {
+    const nameBytes = encoder.encode(weight.name);
+    const dtypeBytes = encoder.encode(weight.dtype);
+    const origDtypeBytes = encoder.encode(weight.originalDtype);
+    totalSize += 4 + nameBytes.length;
+    totalSize += 4 + weight.shape.length * 4;
+    totalSize += 4 + dtypeBytes.length;
+    totalSize += 4 + origDtypeBytes.length;
+    totalSize += 1;
+    if (weight.scale !== void 0) {
+      totalSize += Array.isArray(weight.scale) ? 4 + weight.scale.length * 4 : 4;
+    }
+    totalSize += 1;
+    if (weight.zeroPoint !== void 0) {
+      totalSize += Array.isArray(weight.zeroPoint) ? 4 + weight.zeroPoint.length * 4 : 4;
+    }
+    totalSize += 8 + weight.data.byteLength;
+  }
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+  const uint8 = new Uint8Array(buffer);
+  let offset = 0;
+  view.setUint32(offset, model.version, true);
+  offset += 4;
+  view.setUint32(offset, ["int8", "uint8", "int4", "float16", "dynamic"].indexOf(model.quantizationType), true);
+  offset += 4;
+  view.setUint32(offset, model.originalSize & 4294967295, true);
+  offset += 4;
+  view.setUint32(offset, model.originalSize / 4294967296 >>> 0, true);
+  offset += 4;
+  view.setUint32(offset, model.weights.length, true);
+  offset += 4;
+  for (const weight of model.weights) {
+    const nameBytes = encoder.encode(weight.name);
+    const dtypeBytes = encoder.encode(weight.dtype);
+    const origDtypeBytes = encoder.encode(weight.originalDtype);
+    view.setUint32(offset, nameBytes.length, true);
+    offset += 4;
+    uint8.set(nameBytes, offset);
+    offset += nameBytes.length;
+    view.setUint32(offset, weight.shape.length, true);
+    offset += 4;
+    for (const dim of weight.shape) {
+      view.setInt32(offset, dim, true);
+      offset += 4;
+    }
+    view.setUint32(offset, dtypeBytes.length, true);
+    offset += 4;
+    uint8.set(dtypeBytes, offset);
+    offset += dtypeBytes.length;
+    view.setUint32(offset, origDtypeBytes.length, true);
+    offset += 4;
+    uint8.set(origDtypeBytes, offset);
+    offset += origDtypeBytes.length;
+    if (weight.scale !== void 0) {
+      view.setUint8(offset, 1);
+      offset += 1;
+      if (Array.isArray(weight.scale)) {
+        view.setUint32(offset, weight.scale.length, true);
+        offset += 4;
+        for (const s of weight.scale) {
+          view.setFloat32(offset, s, true);
+          offset += 4;
+        }
+      } else {
+        view.setUint32(offset, 1, true);
+        offset += 4;
+        view.setFloat32(offset, weight.scale, true);
+        offset += 4;
+      }
+    } else {
+      view.setUint8(offset, 0);
+      offset += 1;
+    }
+    if (weight.zeroPoint !== void 0) {
+      view.setUint8(offset, 1);
+      offset += 1;
+      if (Array.isArray(weight.zeroPoint)) {
+        view.setUint32(offset, weight.zeroPoint.length, true);
+        offset += 4;
+        for (const zp of weight.zeroPoint) {
+          view.setInt32(offset, zp, true);
+          offset += 4;
+        }
+      } else {
+        view.setUint32(offset, 1, true);
+        offset += 4;
+        view.setInt32(offset, weight.zeroPoint, true);
+        offset += 4;
+      }
+    } else {
+      view.setUint8(offset, 0);
+      offset += 1;
+    }
+    const dataLow = weight.data.byteLength & 4294967295;
+    const dataHigh = weight.data.byteLength / 4294967296 >>> 0;
+    view.setUint32(offset, dataLow, true);
+    offset += 4;
+    view.setUint32(offset, dataHigh, true);
+    offset += 4;
+    uint8.set(new Uint8Array(weight.data), offset);
+    offset += weight.data.byteLength;
+  }
+  return buffer;
+}
+async function quantizeModel(modelData, options) {
+  const { type, skipPatterns = [], perChannel = false, symmetric = true, onProgress, minTensorSize = 100 } = options;
+  const originalSize = modelData.byteLength;
+  const layerStats = [];
+  let tensorsQuantized = 0;
+  let tensorsSkipped = 0;
+  onProgress?.({ stage: "analyzing", current: 0, total: 1, percent: 0 });
+  const weights = parseModelWeights(modelData);
+  const quantizedWeights = [];
+  let totalParams = 0;
+  let quantizedParams = 0;
+  const scales = [];
+  for (let i = 0; i < weights.length; i++) {
+    const weight = weights[i];
+    const percent = (i + 1) / weights.length * 100;
+    onProgress?.({
+      stage: "quantizing",
+      current: i + 1,
+      total: weights.length,
+      percent,
+      layerName: weight.name
+    });
+    totalParams += weight.data.length;
+    const shouldSkip = weight.data.length < minTensorSize || skipPatterns.some((pattern) => {
+      if (typeof pattern === "string") {
+        return weight.name.includes(pattern);
+      }
+      return pattern.test(weight.name);
+    });
+    if (shouldSkip) {
+      tensorsSkipped++;
+      layerStats.push({
+        name: weight.name,
+        originalDtype: weight.dtype,
+        quantizedDtype: weight.dtype,
+        originalSize: weight.data.byteLength,
+        quantizedSize: weight.data.byteLength,
+        scale: 1,
+        zeroPoint: 0,
+        minValue: Math.min(...weight.data),
+        maxValue: Math.max(...weight.data),
+        skipped: true,
+        skipReason: weight.data.length < minTensorSize ? "Tensor too small" : "Matched skip pattern"
+      });
+      quantizedWeights.push({
+        name: weight.name,
+        data: weight.data.buffer.slice(0),
+        shape: weight.shape,
+        dtype: weight.dtype,
+        originalDtype: weight.dtype
+      });
+      continue;
+    }
+    const bits = type === "int4" ? 4 : 8;
+    const params = calculateQuantParams(weight.data, bits, symmetric, perChannel, 0, weight.shape);
+    let quantizedData2;
+    let quantizedDtype;
+    switch (type) {
+      case "int8":
+        const int8Data = quantizeToInt8(weight.data, params.scale, params.zeroPoint, perChannel, perChannel ? weight.data.length / (weight.shape[0] ?? 1) : weight.data.length);
+        quantizedData2 = int8Data.buffer.slice(0);
+        quantizedDtype = "int8";
+        break;
+      case "uint8":
+        const uint8Data = quantizeToUint8(weight.data, params.scale, params.zeroPoint, perChannel, perChannel ? weight.data.length / (weight.shape[0] ?? 1) : weight.data.length);
+        quantizedData2 = uint8Data.buffer.slice(0);
+        quantizedDtype = "uint8";
+        break;
+      case "int4":
+        const int4Data = quantizeToInt4(weight.data, params.scale, params.zeroPoint);
+        quantizedData2 = int4Data.buffer.slice(0);
+        quantizedDtype = "int4";
+        break;
+      case "float16":
+        const fp16Data = quantizeToFloat16(weight.data);
+        quantizedData2 = fp16Data.buffer.slice(0);
+        quantizedDtype = "float16";
+        break;
+      case "dynamic":
+      default:
+        const dynData = quantizeToInt8(weight.data, params.scale, params.zeroPoint, perChannel, perChannel ? weight.data.length / (weight.shape[0] ?? 1) : weight.data.length);
+        quantizedData2 = dynData.buffer.slice(0);
+        quantizedDtype = "int8";
+        break;
+    }
+    tensorsQuantized++;
+    quantizedParams += weight.data.length;
+    const scaleValue = params.scale instanceof Float32Array ? Array.from(params.scale) : params.scale;
+    const zpValue = params.zeroPoint instanceof Int32Array ? Array.from(params.zeroPoint) : params.zeroPoint;
+    if (typeof scaleValue === "number") {
+      scales.push(scaleValue);
+    } else {
+      scales.push(...scaleValue);
+    }
+    layerStats.push({
+      name: weight.name,
+      originalDtype: weight.dtype,
+      quantizedDtype,
+      originalSize: weight.data.byteLength,
+      quantizedSize: quantizedData2.byteLength,
+      scale: scaleValue,
+      zeroPoint: zpValue,
+      minValue: params.min,
+      maxValue: params.max,
+      skipped: false
+    });
+    quantizedWeights.push({
+      name: weight.name,
+      data: quantizedData2,
+      shape: weight.shape,
+      dtype: quantizedDtype,
+      originalDtype: weight.dtype,
+      scale: scaleValue,
+      zeroPoint: zpValue
+    });
+  }
+  onProgress?.({ stage: "packing", current: 0, total: 1, percent: 0 });
+  const quantizedModel = {
+    version: 1,
+    quantizationType: type,
+    originalSize,
+    weights: quantizedWeights
+  };
+  const quantizedData = serializeQuantizedModel(quantizedModel);
+  onProgress?.({ stage: "complete", current: 1, total: 1, percent: 100 });
+  const avgScale = scales.length > 0 ? scales.reduce((a, b) => a + b, 0) / scales.length : 1;
+  const minScale = scales.length > 0 ? Math.min(...scales) : 1;
+  const maxScale = scales.length > 0 ? Math.max(...scales) : 1;
+  const bitsReduction = type === "int4" ? 8 : type === "float16" ? 2 : 4;
+  const errorEstimate = avgScale / bitsReduction;
+  return {
+    data: quantizedData,
+    originalSize,
+    quantizedSize: quantizedData.byteLength,
+    compressionRatio: originalSize / quantizedData.byteLength,
+    tensorsQuantized,
+    tensorsSkipped,
+    layerStats,
+    stats: {
+      totalParameters: totalParams,
+      quantizedParameters: quantizedParams,
+      averageScale: avgScale,
+      minScale,
+      maxScale,
+      errorEstimate
+    }
+  };
+}
+function quantizeTensor(tensor2, type, options = {}) {
+  const { symmetric = true, perChannel = false } = options;
+  const data = tensor2.toFloat32Array();
+  const shape = tensor2.shape;
+  const bits = type === "int4" ? 4 : 8;
+  const params = calculateQuantParams(data, bits, symmetric, perChannel, 0, shape);
+  let quantizedData;
+  let dtype;
+  switch (type) {
+    case "int8":
+      quantizedData = quantizeToInt8(data, params.scale, params.zeroPoint, perChannel);
+      dtype = "int32";
+      break;
+    case "uint8":
+      quantizedData = quantizeToUint8(data, params.scale, params.zeroPoint, perChannel);
+      dtype = "int32";
+      break;
+    case "float16":
+      quantizedData = quantizeToFloat16(data);
+      dtype = "float32";
+      break;
+    default:
+      quantizedData = quantizeToInt8(data, params.scale, params.zeroPoint, perChannel);
+      dtype = "int32";
+  }
+  const scaleValue = params.scale instanceof Float32Array ? Array.from(params.scale) : params.scale;
+  const zpValue = params.zeroPoint instanceof Int32Array ? Array.from(params.zeroPoint) : params.zeroPoint;
+  return {
+    tensor: new EdgeFlowTensor(Array.from(quantizedData), shape, dtype),
+    scale: scaleValue,
+    zeroPoint: zpValue
+  };
+}
+function dequantizeTensor(tensor2, scale, zeroPoint, type) {
+  const data = tensor2.toArray();
+  const shape = tensor2.shape;
+  let dequantizedData;
+  const scaleArr = Array.isArray(scale) ? new Float32Array(scale) : scale;
+  const zpArr = Array.isArray(zeroPoint) ? new Int32Array(zeroPoint) : zeroPoint;
+  const perChannel = Array.isArray(scale);
+  switch (type) {
+    case "int8":
+      dequantizedData = dequantizeInt8(new Int8Array(data.map(Number)), scaleArr, zpArr, perChannel);
+      break;
+    case "uint8":
+      dequantizedData = dequantizeUint8(new Uint8Array(data.map(Number)), scaleArr, zpArr, perChannel);
+      break;
+    case "float16":
+      dequantizedData = dequantizeFloat16(new Uint16Array(data.map(Number)));
+      break;
+    default:
+      dequantizedData = dequantizeInt8(new Int8Array(data.map(Number)), scaleArr, zpArr, perChannel);
+  }
+  return new EdgeFlowTensor(Array.from(dequantizedData), shape, "float32");
+}
+function pruneTensor(tensor2, options = {}) {
+  const { ratio = 0.5, method = "magnitude", threshold } = options;
+  const data = tensor2.toFloat32Array();
+  const shape = tensor2.shape;
+  const mask = new Float32Array(data.length);
+  const prunedData = new Float32Array(data.length);
+  let prunedCount = 0;
+  if (method === "magnitude") {
+    const absValues = Array.from(data).map(Math.abs).sort((a, b) => a - b);
+    const thresholdIndex = Math.floor(absValues.length * ratio);
+    const computedThreshold = threshold ?? (absValues[thresholdIndex] ?? 0);
+    for (let i = 0; i < data.length; i++) {
+      if (Math.abs(data[i] ?? 0) > computedThreshold) {
+        mask[i] = 1;
+        prunedData[i] = data[i] ?? 0;
+      } else {
+        mask[i] = 0;
+        prunedData[i] = 0;
+        prunedCount++;
+      }
+    }
+  } else if (method === "random") {
+    for (let i = 0; i < data.length; i++) {
+      if (Math.random() > ratio) {
+        mask[i] = 1;
+        prunedData[i] = data[i] ?? 0;
+      } else {
+        mask[i] = 0;
+        prunedData[i] = 0;
+        prunedCount++;
+      }
+    }
+  }
+  return {
+    tensor: new EdgeFlowTensor(Array.from(prunedData), shape, "float32"),
+    mask: new EdgeFlowTensor(Array.from(mask), shape, "float32"),
+    sparsity: prunedCount / data.length
+  };
+}
+async function pruneModel(modelData, options = {}) {
+  const { onProgress } = options;
+  onProgress?.({ current: 0, total: 1, percent: 0 });
+  const weights = parseModelWeights(modelData);
+  let totalParams = 0;
+  let prunedParams = 0;
+  for (const weight of weights) {
+    totalParams += weight.data.length;
+    const tensor2 = new EdgeFlowTensor(Array.from(weight.data), weight.shape, "float32");
+    const { sparsity } = pruneTensor(tensor2, options);
+    prunedParams += Math.floor(weight.data.length * sparsity);
+  }
+  onProgress?.({ current: 1, total: 1, percent: 100 });
+  return {
+    data: modelData,
+    // In a real implementation, we'd create a sparse format
+    originalSize: modelData.byteLength,
+    prunedSize: modelData.byteLength,
+    // Would be smaller with sparse format
+    sparsity: prunedParams / totalParams,
+    parametersPruned: prunedParams,
+    totalParameters: totalParams
+  };
+}
+async function analyzeModel(modelData) {
+  const weights = parseModelWeights(modelData);
+  const totalSize = modelData.byteLength;
+  const dtypeBreakdown = {};
+  let totalParams = 0;
+  const tensorInfos = [];
+  for (const weight of weights) {
+    totalParams += weight.data.length;
+    const bytesPerElement = weight.dtype === "float32" ? 4 : weight.dtype === "float16" ? 2 : weight.dtype === "int8" ? 1 : 4;
+    const size = weight.data.length * bytesPerElement;
+    if (!dtypeBreakdown[weight.dtype]) {
+      dtypeBreakdown[weight.dtype] = { count: 0, size: 0 };
+    }
+    dtypeBreakdown[weight.dtype].count++;
+    dtypeBreakdown[weight.dtype].size += size;
+    tensorInfos.push({
+      name: weight.name,
+      size,
+      shape: weight.shape
+    });
+  }
+  tensorInfos.sort((a, b) => b.size - a.size);
+  const largestTensors = tensorInfos.slice(0, 10);
+  const estimatedQuantizedSizes = {
+    int8: Math.ceil(totalSize / 4),
+    uint8: Math.ceil(totalSize / 4),
+    int4: Math.ceil(totalSize / 8),
+    float16: Math.ceil(totalSize / 2),
+    dynamic: Math.ceil(totalSize / 4)
+  };
+  let recommendedQuantization = "dynamic";
+  if (totalSize > 500 * 1024 * 1024) {
+    recommendedQuantization = "int4";
+  } else if (totalSize > 100 * 1024 * 1024) {
+    recommendedQuantization = "int8";
+  } else if (totalSize > 50 * 1024 * 1024) {
+    recommendedQuantization = "float16";
+  }
+  return {
+    totalSize,
+    tensorCount: weights.length,
+    totalParameters: totalParams,
+    dtypeBreakdown,
+    largestTensors,
+    estimatedMemory: totalParams * 4,
+    // Assuming float32 at runtime
+    recommendedQuantization,
+    estimatedQuantizedSizes
+  };
+}
+async function exportModel(modelData, options) {
+  const { format, quantize: quantize2 } = options;
+  let data = modelData;
+  if (quantize2) {
+    const result = await quantizeModel(modelData, { type: quantize2 });
+    data = result.data;
+  }
+  switch (format) {
+    case "edgeflow":
+      return data;
+    case "onnx":
+      return data;
+    case "tflite":
+      return data;
+    default:
+      return data;
+  }
+}
+
+// dist/tools/debugger.js
+function calculateTensorStats(data) {
+  const arr = data instanceof Float32Array ? data : new Float32Array(data);
+  let min = Infinity;
+  let max = -Infinity;
+  let sum2 = 0;
+  let zeros2 = 0;
+  let nans = 0;
+  let infinities = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const val = arr[i] ?? 0;
+    if (isNaN(val)) {
+      nans++;
+      continue;
+    }
+    if (!isFinite(val)) {
+      infinities++;
+      continue;
+    }
+    min = Math.min(min, val);
+    max = Math.max(max, val);
+    sum2 += val;
+    if (val === 0)
+      zeros2++;
+  }
+  const validCount = arr.length - nans - infinities;
+  const mean2 = validCount > 0 ? sum2 / validCount : 0;
+  let varianceSum = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const val = arr[i] ?? 0;
+    if (!isNaN(val) && isFinite(val)) {
+      varianceSum += Math.pow(val - mean2, 2);
+    }
+  }
+  const std = validCount > 0 ? Math.sqrt(varianceSum / validCount) : 0;
+  return {
+    min: min === Infinity ? 0 : min,
+    max: max === -Infinity ? 0 : max,
+    mean: mean2,
+    std,
+    zeros: zeros2,
+    nans,
+    infinities,
+    sparsity: zeros2 / arr.length
+  };
+}
+function createHistogram(data, bins = 50) {
+  const arr = data instanceof Float32Array ? data : new Float32Array(data);
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    const val = arr[i] ?? 0;
+    if (!isNaN(val) && isFinite(val)) {
+      min = Math.min(min, val);
+      max = Math.max(max, val);
+    }
+  }
+  if (min === Infinity || max === -Infinity || min === max) {
+    return { bins: [min || 0], counts: [arr.length], binEdges: [min || 0, max || 0] };
+  }
+  const binWidth = (max - min) / bins;
+  const counts = new Array(bins).fill(0);
+  const binEdges = new Array(bins + 1);
+  for (let i = 0; i <= bins; i++) {
+    binEdges[i] = min + i * binWidth;
+  }
+  for (let i = 0; i < arr.length; i++) {
+    const val = arr[i] ?? 0;
+    if (!isNaN(val) && isFinite(val)) {
+      const binIndex = Math.min(Math.floor((val - min) / binWidth), bins - 1);
+      counts[binIndex]++;
+    }
+  }
+  return {
+    bins: binEdges.slice(0, -1).map((e, i) => (e + binEdges[i + 1]) / 2),
+    counts,
+    binEdges
+  };
+}
+function inspectTensor(tensor2, name = "tensor", options = {}) {
+  const { histogram = true, maxSample = 10 } = options;
+  const data = tensor2.toFloat32Array();
+  const shape = tensor2.shape;
+  const size = tensor2.size;
+  const sampleIndices = [];
+  const step = Math.max(1, Math.floor(size / maxSample));
+  for (let i = 0; i < size && sampleIndices.length < maxSample; i += step) {
+    sampleIndices.push(i);
+  }
+  const sample = sampleIndices.map((i) => data[i] ?? 0);
+  const bytesPerElement = tensor2.dtype === "float32" ? 4 : tensor2.dtype === "int32" ? 4 : tensor2.dtype === "int64" ? 8 : 4;
+  const memoryBytes = size * bytesPerElement;
+  return {
+    name,
+    shape,
+    dtype: tensor2.dtype,
+    size,
+    memoryBytes,
+    stats: calculateTensorStats(data),
+    sample,
+    histogram: histogram ? createHistogram(data) : void 0
+  };
+}
+function formatTensorInspection(inspection) {
+  const { name, shape, dtype, size, memoryBytes, stats, sample } = inspection;
+  const lines = [
+    `\u250C\u2500 Tensor: ${name} \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
+    `\u2502 Shape: [${shape.join(", ")}]`,
+    `\u2502 Dtype: ${dtype}`,
+    `\u2502 Size: ${size.toLocaleString()} elements`,
+    `\u2502 Memory: ${formatBytes(memoryBytes)}`,
+    `\u251C\u2500 Statistics \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
+    `\u2502 Min: ${stats.min.toFixed(6)}`,
+    `\u2502 Max: ${stats.max.toFixed(6)}`,
+    `\u2502 Mean: ${stats.mean.toFixed(6)}`,
+    `\u2502 Std: ${stats.std.toFixed(6)}`,
+    `\u2502 Sparsity: ${(stats.sparsity * 100).toFixed(2)}%`
+  ];
+  if (stats.nans > 0) {
+    lines.push(`\u2502 \u26A0\uFE0F NaN values: ${stats.nans}`);
+  }
+  if (stats.infinities > 0) {
+    lines.push(`\u2502 \u26A0\uFE0F Infinity values: ${stats.infinities}`);
+  }
+  lines.push(`\u251C\u2500 Sample Values \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+  lines.push(`\u2502 [${sample.map((v) => v.toFixed(4)).join(", ")}]`);
+  lines.push(`\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+  return lines.join("\n");
+}
+function formatBytes(bytes) {
+  if (bytes < 1024)
+    return `${bytes} B`;
+  if (bytes < 1024 * 1024)
+    return `${(bytes / 1024).toFixed(2)} KB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+var EdgeFlowDebugger = class {
+  constructor(config = {}) {
+    __publicField(this, "config");
+    __publicField(this, "events", []);
+    __publicField(this, "traces", []);
+    __publicField(this, "performanceMetrics");
+    __publicField(this, "listeners", /* @__PURE__ */ new Map());
+    __publicField(this, "isEnabled", true);
+    this.config = {
+      logging: config.logging ?? true,
+      logLevel: config.logLevel ?? "info",
+      inspectTensors: config.inspectTensors ?? true,
+      maxDisplayValues: config.maxDisplayValues ?? 10,
+      trackPerformance: config.trackPerformance ?? true,
+      logger: config.logger ?? this.defaultLogger.bind(this)
+    };
+    this.performanceMetrics = {
+      inferenceCount: 0,
+      totalInferenceTime: 0,
+      averageInferenceTime: 0,
+      minInferenceTime: Infinity,
+      maxInferenceTime: 0,
+      peakMemoryUsage: 0,
+      currentMemoryUsage: 0,
+      tensorAllocations: 0,
+      tensorDeallocations: 0
+    };
+  }
+  /**
+   * Default logger
+   */
+  defaultLogger(level, message, data) {
+    const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+    const prefix = `[edgeFlow.js ${timestamp}] [${level.toUpperCase()}]`;
+    switch (level) {
+      case "debug":
+        console.debug(prefix, message, data ?? "");
+        break;
+      case "info":
+        console.info(prefix, message, data ?? "");
+        break;
+      case "warn":
+        console.warn(prefix, message, data ?? "");
+        break;
+      case "error":
+        console.error(prefix, message, data ?? "");
+        break;
+      default:
+        console.log(prefix, message, data ?? "");
+    }
+  }
+  /**
+   * Log a message
+   */
+  log(level, message, data) {
+    if (!this.isEnabled || !this.config.logging)
+      return;
+    const levels = ["debug", "info", "warn", "error"];
+    const configLevel = levels.indexOf(this.config.logLevel);
+    const msgLevel = levels.indexOf(level);
+    if (msgLevel >= configLevel) {
+      this.config.logger(level, message, data);
+    }
+  }
+  /**
+   * Add debug event
+   */
+  addEvent(event) {
+    this.events.push(event);
+    const listeners = this.listeners.get(event.type) ?? [];
+    for (const listener of listeners) {
+      listener(event);
+    }
+    if (this.events.length > 1e3) {
+      this.events = this.events.slice(-1e3);
+    }
+  }
+  /**
+   * Enable debugger
+   */
+  enable() {
+    this.isEnabled = true;
+    this.log("info", "Debugger enabled");
+  }
+  /**
+   * Disable debugger
+   */
+  disable() {
+    this.isEnabled = false;
+  }
+  /**
+   * Subscribe to events
+   */
+  on(type, callback) {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(callback);
+    this.listeners.set(type, listeners);
+    return () => {
+      const idx = listeners.indexOf(callback);
+      if (idx !== -1)
+        listeners.splice(idx, 1);
+    };
+  }
+  /**
+   * Inspect and log a tensor
+   */
+  inspectTensor(tensor2, name = "tensor") {
+    const inspection = inspectTensor(tensor2, name, {
+      histogram: true,
+      maxSample: this.config.maxDisplayValues
+    });
+    if (this.config.inspectTensors) {
+      this.log("debug", `Tensor: ${name}`, inspection);
+      this.addEvent({
+        type: "tensor",
+        timestamp: Date.now(),
+        message: `Inspected tensor: ${name}`,
+        data: inspection
+      });
+      if (inspection.stats.nans > 0) {
+        this.log("warn", `Tensor "${name}" contains ${inspection.stats.nans} NaN values`);
+      }
+      if (inspection.stats.infinities > 0) {
+        this.log("warn", `Tensor "${name}" contains ${inspection.stats.infinities} Infinity values`);
+      }
+    }
+    return inspection;
+  }
+  /**
+   * Start tracing an inference
+   */
+  startTrace(modelId) {
+    const id = `trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const trace = {
+      id,
+      modelId,
+      timestamp: Date.now(),
+      inputs: [],
+      outputs: [],
+      duration: 0,
+      memoryUsed: 0,
+      operations: []
+    };
+    this.traces.push(trace);
+    this.log("debug", `Started trace: ${id} for model: ${modelId}`);
+    return id;
+  }
+  /**
+   * Add input to trace
+   */
+  traceInput(traceId, tensor2, name) {
+    const trace = this.traces.find((t) => t.id === traceId);
+    if (!trace)
+      return;
+    trace.inputs.push(inspectTensor(tensor2, name));
+  }
+  /**
+   * Add output to trace
+   */
+  traceOutput(traceId, tensor2, name) {
+    const trace = this.traces.find((t) => t.id === traceId);
+    if (!trace)
+      return;
+    trace.outputs.push(inspectTensor(tensor2, name));
+  }
+  /**
+   * Add operation to trace
+   */
+  traceOperation(traceId, operation) {
+    const trace = this.traces.find((t) => t.id === traceId);
+    if (!trace)
+      return;
+    trace.operations.push(operation);
+  }
+  /**
+   * End trace
+   */
+  endTrace(traceId) {
+    const trace = this.traces.find((t) => t.id === traceId);
+    if (!trace)
+      return;
+    trace.duration = Date.now() - trace.timestamp;
+    this.performanceMetrics.inferenceCount++;
+    this.performanceMetrics.totalInferenceTime += trace.duration;
+    this.performanceMetrics.averageInferenceTime = this.performanceMetrics.totalInferenceTime / this.performanceMetrics.inferenceCount;
+    this.performanceMetrics.minInferenceTime = Math.min(this.performanceMetrics.minInferenceTime, trace.duration);
+    this.performanceMetrics.maxInferenceTime = Math.max(this.performanceMetrics.maxInferenceTime, trace.duration);
+    this.log("info", `Trace completed: ${traceId}`, {
+      duration: `${trace.duration}ms`,
+      inputs: trace.inputs.length,
+      outputs: trace.outputs.length,
+      operations: trace.operations.length
+    });
+    this.addEvent({
+      type: "inference",
+      timestamp: Date.now(),
+      message: `Inference completed in ${trace.duration}ms`,
+      data: trace
+    });
+    return trace;
+  }
+  /**
+   * Record tensor allocation
+   */
+  recordAllocation(tensor2) {
+    if (!this.config.trackPerformance)
+      return;
+    this.performanceMetrics.tensorAllocations++;
+    const memory = tensor2.size * 4;
+    this.performanceMetrics.currentMemoryUsage += memory;
+    this.performanceMetrics.peakMemoryUsage = Math.max(this.performanceMetrics.peakMemoryUsage, this.performanceMetrics.currentMemoryUsage);
+  }
+  /**
+   * Record tensor deallocation
+   */
+  recordDeallocation(tensor2) {
+    if (!this.config.trackPerformance)
+      return;
+    this.performanceMetrics.tensorDeallocations++;
+    const memory = tensor2.size * 4;
+    this.performanceMetrics.currentMemoryUsage -= memory;
+  }
+  /**
+   * Get performance metrics
+   */
+  getPerformanceMetrics() {
+    return { ...this.performanceMetrics };
+  }
+  /**
+   * Get all events
+   */
+  getEvents() {
+    return [...this.events];
+  }
+  /**
+   * Get all traces
+   */
+  getTraces() {
+    return [...this.traces];
+  }
+  /**
+   * Get trace by ID
+   */
+  getTrace(traceId) {
+    return this.traces.find((t) => t.id === traceId);
+  }
+  /**
+   * Clear all data
+   */
+  clear() {
+    this.events = [];
+    this.traces = [];
+    this.performanceMetrics = {
+      inferenceCount: 0,
+      totalInferenceTime: 0,
+      averageInferenceTime: 0,
+      minInferenceTime: Infinity,
+      maxInferenceTime: 0,
+      peakMemoryUsage: 0,
+      currentMemoryUsage: 0,
+      tensorAllocations: 0,
+      tensorDeallocations: 0
+    };
+  }
+  /**
+   * Export debug data
+   */
+  export() {
+    return {
+      events: this.getEvents(),
+      traces: this.getTraces(),
+      metrics: this.getPerformanceMetrics(),
+      timestamp: Date.now()
+    };
+  }
+  /**
+   * Generate summary report
+   */
+  generateReport() {
+    const metrics = this.getPerformanceMetrics();
+    const traces = this.getTraces();
+    const lines = [
+      "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557",
+      "\u2551               edgeFlow.js Debug Report                          \u2551",
+      "\u2560\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2563",
+      "\u2551 Performance Metrics                                             \u2551",
+      "\u255F\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2562",
+      `\u2551 Total Inferences:     ${metrics.inferenceCount.toString().padStart(10)}                          \u2551`,
+      `\u2551 Average Time:         ${metrics.averageInferenceTime.toFixed(2).padStart(10)}ms                       \u2551`,
+      `\u2551 Min Time:             ${(metrics.minInferenceTime === Infinity ? 0 : metrics.minInferenceTime).toFixed(2).padStart(10)}ms                       \u2551`,
+      `\u2551 Max Time:             ${metrics.maxInferenceTime.toFixed(2).padStart(10)}ms                       \u2551`,
+      `\u2551 Peak Memory:          ${formatBytes(metrics.peakMemoryUsage).padStart(10)}                          \u2551`,
+      `\u2551 Current Memory:       ${formatBytes(metrics.currentMemoryUsage).padStart(10)}                          \u2551`,
+      `\u2551 Tensor Allocations:   ${metrics.tensorAllocations.toString().padStart(10)}                          \u2551`,
+      `\u2551 Tensor Deallocations: ${metrics.tensorDeallocations.toString().padStart(10)}                          \u2551`,
+      "\u255F\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2562",
+      "\u2551 Recent Traces                                                   \u2551",
+      "\u255F\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2562"
+    ];
+    const recentTraces = traces.slice(-5);
+    for (const trace of recentTraces) {
+      lines.push(`\u2551 ${trace.id.slice(0, 20).padEnd(20)} | ${trace.duration.toFixed(2).padStart(8)}ms | ${trace.modelId.slice(0, 20).padEnd(20)} \u2551`);
+    }
+    if (recentTraces.length === 0) {
+      lines.push("\u2551 No traces recorded                                              \u2551");
+    }
+    lines.push("\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D");
+    return lines.join("\n");
+  }
+};
+var globalDebugger = null;
+function getDebugger(config) {
+  if (!globalDebugger || config) {
+    globalDebugger = new EdgeFlowDebugger(config);
+  }
+  return globalDebugger;
+}
+function enableDebugging(config) {
+  const debugger_ = getDebugger(config);
+  debugger_.enable();
+  return debugger_;
+}
+function disableDebugging() {
+  globalDebugger?.disable();
+}
+function createAsciiHistogram(histogram, width = 50, height = 10) {
+  const { counts, binEdges } = histogram;
+  const maxCount = Math.max(...counts);
+  if (maxCount === 0)
+    return "No data to display";
+  const lines = [];
+  const scaled = counts.map((c) => Math.round(c / maxCount * height));
+  for (let row = height; row > 0; row--) {
+    let line = row === height ? `${maxCount.toString().padStart(6)} \u2502` : "       \u2502";
+    for (let col = 0; col < width && col < scaled.length; col++) {
+      line += (scaled[col] ?? 0) >= row ? "\u2588" : " ";
+    }
+    lines.push(line);
+  }
+  lines.push("       \u2514" + "\u2500".repeat(Math.min(width, scaled.length)));
+  const minLabel = (binEdges[0] ?? 0).toFixed(2);
+  const maxLabel = (binEdges[binEdges.length - 1] ?? 0).toFixed(2);
+  lines.push(`        ${minLabel}${" ".repeat(Math.max(0, Math.min(width, scaled.length) - minLabel.length - maxLabel.length))}${maxLabel}`);
+  return lines.join("\n");
+}
+function createTensorHeatmap(tensor2, width = 40) {
+  const shape = tensor2.shape;
+  if (shape.length !== 2) {
+    return "Heatmap only supports 2D tensors";
+  }
+  const [rows, cols] = shape;
+  if (rows === void 0 || cols === void 0) {
+    return "Invalid tensor shape";
+  }
+  const data = tensor2.toFloat32Array();
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < data.length; i++) {
+    const val = data[i] ?? 0;
+    if (!isNaN(val) && isFinite(val)) {
+      min = Math.min(min, val);
+      max = Math.max(max, val);
+    }
+  }
+  const range = max - min;
+  const chars = [" ", "\u2591", "\u2592", "\u2593", "\u2588"];
+  const lines = [];
+  const scaleX = Math.max(1, Math.ceil(cols / width));
+  const displayCols = Math.min(cols, width);
+  for (let r = 0; r < rows; r++) {
+    let line = "";
+    for (let c = 0; c < displayCols; c++) {
+      const idx = r * cols + c * scaleX;
+      const val = data[idx] ?? 0;
+      const normalized = range > 0 ? (val - min) / range : 0;
+      const charIdx = Math.floor(normalized * (chars.length - 1));
+      line += chars[charIdx];
+    }
+    lines.push(line);
+  }
+  return lines.join("\n");
+}
+function visualizeModelArchitecture(layers) {
+  const lines = [];
+  lines.push("\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510");
+  lines.push("\u2502                        Model Architecture                          \u2502");
+  lines.push("\u251C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524");
+  for (let i = 0; i < layers.length; i++) {
+    const layer = layers[i];
+    const inputStr = `[${layer.inputShape.join("\xD7")}]`;
+    const outputStr = `[${layer.outputShape.join("\xD7")}]`;
+    lines.push(`\u2502 ${(i + 1).toString().padStart(2)}. ${layer.name.padEnd(20)} \u2502 ${layer.type.padEnd(15)} \u2502`);
+    lines.push(`\u2502     ${inputStr.padEnd(15)} \u2192 ${outputStr.padEnd(15)}                   \u2502`);
+    if (i < layers.length - 1) {
+      lines.push("\u2502                           \u2193                                        \u2502");
+    }
+  }
+  lines.push("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518");
+  return lines.join("\n");
+}
+
+// dist/tools/monitor.js
+var PerformanceMonitor = class {
+  constructor(config = {}) {
+    __publicField(this, "config");
+    __publicField(this, "samples", []);
+    __publicField(this, "isRunning", false);
+    __publicField(this, "intervalId", null);
+    __publicField(this, "alerts", []);
+    __publicField(this, "alertListeners", []);
+    __publicField(this, "sampleListeners", []);
+    // Inference tracking
+    __publicField(this, "inferenceCount", 0);
+    __publicField(this, "inferenceTimes", []);
+    __publicField(this, "queueLength", 0);
+    __publicField(this, "activeCount", 0);
+    // FPS tracking
+    __publicField(this, "frameCount", 0);
+    __publicField(this, "lastFrameTime", 0);
+    __publicField(this, "fps", 0);
+    __publicField(this, "rafId", null);
+    // Memory tracking
+    __publicField(this, "tensorMemory", 0);
+    __publicField(this, "cacheMemory", 0);
+    this.config = {
+      enabled: config.enabled ?? true,
+      sampleInterval: config.sampleInterval ?? 1e3,
+      historySize: config.historySize ?? 60,
+      monitorMemory: config.monitorMemory ?? true,
+      monitorFPS: config.monitorFPS ?? true,
+      collectors: config.collectors ?? []
+    };
+  }
+  /**
+   * Start monitoring
+   */
+  start() {
+    if (this.isRunning)
+      return;
+    this.isRunning = true;
+    this.intervalId = setInterval(() => {
+      this.collectSample();
+    }, this.config.sampleInterval);
+    if (this.config.monitorFPS && typeof requestAnimationFrame !== "undefined") {
+      this.lastFrameTime = performance.now();
+      this.frameCount = 0;
+      this.monitorFPS();
+    }
+  }
+  /**
+   * Stop monitoring
+   */
+  stop() {
+    this.isRunning = false;
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+  }
+  /**
+   * Monitor FPS
+   */
+  monitorFPS() {
+    if (!this.isRunning)
+      return;
+    this.frameCount++;
+    const now = performance.now();
+    const elapsed = now - this.lastFrameTime;
+    if (elapsed >= 1e3) {
+      this.fps = Math.round(this.frameCount * 1e3 / elapsed);
+      this.frameCount = 0;
+      this.lastFrameTime = now;
+    }
+    this.rafId = requestAnimationFrame(() => this.monitorFPS());
+  }
+  /**
+   * Collect a performance sample
+   */
+  collectSample() {
+    const now = Date.now();
+    const avgTime = this.inferenceTimes.length > 0 ? this.inferenceTimes.reduce((a, b) => a + b, 0) / this.inferenceTimes.length : 0;
+    const minTime = this.inferenceTimes.length > 0 ? Math.min(...this.inferenceTimes) : 0;
+    const maxTime = this.inferenceTimes.length > 0 ? Math.max(...this.inferenceTimes) : 0;
+    const throughput = this.inferenceCount / (this.config.sampleInterval / 1e3);
+    const inference = {
+      count: this.inferenceCount,
+      avgTime,
+      minTime,
+      maxTime,
+      throughput,
+      queueLength: this.queueLength,
+      activeCount: this.activeCount
+    };
+    const memory = this.collectMemoryMetrics();
+    const system = this.collectSystemMetrics();
+    const custom = {};
+    for (const collector of this.config.collectors) {
+      try {
+        Object.assign(custom, collector());
+      } catch {
+      }
+    }
+    const sample = {
+      timestamp: now,
+      inference,
+      memory,
+      system,
+      custom
+    };
+    this.samples.push(sample);
+    if (this.samples.length > this.config.historySize) {
+      this.samples.shift();
+    }
+    this.checkAlerts(sample);
+    for (const listener of this.sampleListeners) {
+      listener(sample);
+    }
+    this.inferenceCount = 0;
+    this.inferenceTimes = [];
+  }
+  /**
+   * Collect memory metrics
+   */
+  collectMemoryMetrics() {
+    let usedHeap = 0;
+    let totalHeap = 0;
+    let heapLimit = 0;
+    if (typeof performance !== "undefined" && "memory" in performance) {
+      const memory = performance.memory;
+      usedHeap = memory.usedJSHeapSize;
+      totalHeap = memory.totalJSHeapSize;
+      heapLimit = memory.jsHeapSizeLimit;
+    }
+    return {
+      usedHeap,
+      totalHeap,
+      heapLimit,
+      heapUsage: heapLimit > 0 ? usedHeap / heapLimit : 0,
+      tensorMemory: this.tensorMemory,
+      cacheMemory: this.cacheMemory
+    };
+  }
+  /**
+   * Collect system metrics
+   */
+  collectSystemMetrics() {
+    const lastSample = this.samples[this.samples.length - 1];
+    const deltaTime = lastSample ? Date.now() - lastSample.timestamp : this.config.sampleInterval;
+    let webgpuAvailable = false;
+    if (typeof navigator !== "undefined" && "gpu" in navigator) {
+      webgpuAvailable = true;
+    }
+    let webnnAvailable = false;
+    if (typeof navigator !== "undefined" && "ml" in navigator) {
+      webnnAvailable = true;
+    }
+    return {
+      fps: this.fps,
+      cpuUsage: this.estimateCPUUsage(),
+      deltaTime,
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
+      webgpuAvailable,
+      webnnAvailable
+    };
+  }
+  /**
+   * Estimate CPU usage based on inference times
+   */
+  estimateCPUUsage() {
+    if (this.inferenceTimes.length === 0)
+      return 0;
+    const totalTime = this.inferenceTimes.reduce((a, b) => a + b, 0);
+    return Math.min(1, totalTime / this.config.sampleInterval);
+  }
+  /**
+   * Check alerts
+   */
+  checkAlerts(sample) {
+    for (const alert of this.alerts) {
+      const value = this.getMetricValue(sample, alert.metric);
+      if (value === void 0)
+        continue;
+      let triggered = false;
+      switch (alert.operator) {
+        case ">":
+          triggered = value > alert.threshold;
+          break;
+        case "<":
+          triggered = value < alert.threshold;
+          break;
+        case ">=":
+          triggered = value >= alert.threshold;
+          break;
+        case "<=":
+          triggered = value <= alert.threshold;
+          break;
+        case "==":
+          triggered = value === alert.threshold;
+          break;
+        case "!=":
+          triggered = value !== alert.threshold;
+          break;
+      }
+      if (triggered) {
+        const event = {
+          config: alert,
+          value,
+          timestamp: sample.timestamp
+        };
+        for (const listener of this.alertListeners) {
+          listener(event);
+        }
+      }
+    }
+  }
+  /**
+   * Get metric value from sample
+   */
+  getMetricValue(sample, metric) {
+    const parts = metric.split(".");
+    let value = sample;
+    for (const part of parts) {
+      if (value && typeof value === "object" && part in value) {
+        value = value[part];
+      } else {
+        return void 0;
+      }
+    }
+    return typeof value === "number" ? value : void 0;
+  }
+  /**
+   * Record an inference
+   */
+  recordInference(duration) {
+    this.inferenceCount++;
+    this.inferenceTimes.push(duration);
+  }
+  /**
+   * Update queue length
+   */
+  updateQueueLength(length) {
+    this.queueLength = length;
+  }
+  /**
+   * Update active count
+   */
+  updateActiveCount(count) {
+    this.activeCount = count;
+  }
+  /**
+   * Update tensor memory
+   */
+  updateTensorMemory(bytes) {
+    this.tensorMemory = bytes;
+  }
+  /**
+   * Update cache memory
+   */
+  updateCacheMemory(bytes) {
+    this.cacheMemory = bytes;
+  }
+  /**
+   * Add an alert
+   */
+  addAlert(config) {
+    this.alerts.push(config);
+  }
+  /**
+   * Remove an alert
+   */
+  removeAlert(metric) {
+    this.alerts = this.alerts.filter((a) => a.metric !== metric);
+  }
+  /**
+   * Subscribe to alerts
+   */
+  onAlert(callback) {
+    this.alertListeners.push(callback);
+    return () => {
+      const idx = this.alertListeners.indexOf(callback);
+      if (idx !== -1)
+        this.alertListeners.splice(idx, 1);
+    };
+  }
+  /**
+   * Subscribe to samples
+   */
+  onSample(callback) {
+    this.sampleListeners.push(callback);
+    return () => {
+      const idx = this.sampleListeners.indexOf(callback);
+      if (idx !== -1)
+        this.sampleListeners.splice(idx, 1);
+    };
+  }
+  /**
+   * Get current sample
+   */
+  getCurrentSample() {
+    return this.samples[this.samples.length - 1];
+  }
+  /**
+   * Get all samples
+   */
+  getSamples() {
+    return [...this.samples];
+  }
+  /**
+   * Get samples in time range
+   */
+  getSamplesInRange(startTime, endTime) {
+    return this.samples.filter((s) => s.timestamp >= startTime && s.timestamp <= endTime);
+  }
+  /**
+   * Get summary statistics
+   */
+  getSummary() {
+    if (this.samples.length === 0) {
+      return {
+        avgInferenceTime: 0,
+        avgThroughput: 0,
+        avgMemoryUsage: 0,
+        avgFPS: 0,
+        totalInferences: 0,
+        uptime: 0
+      };
+    }
+    const avgInferenceTime = this.samples.reduce((sum2, s) => sum2 + s.inference.avgTime, 0) / this.samples.length;
+    const avgThroughput = this.samples.reduce((sum2, s) => sum2 + s.inference.throughput, 0) / this.samples.length;
+    const avgMemoryUsage = this.samples.reduce((sum2, s) => sum2 + s.memory.heapUsage, 0) / this.samples.length;
+    const avgFPS = this.samples.reduce((sum2, s) => sum2 + s.system.fps, 0) / this.samples.length;
+    const totalInferences = this.samples.reduce((sum2, s) => sum2 + s.inference.count, 0);
+    const firstSample = this.samples[0];
+    const lastSample = this.samples[this.samples.length - 1];
+    const uptime = lastSample.timestamp - firstSample.timestamp;
+    return {
+      avgInferenceTime,
+      avgThroughput,
+      avgMemoryUsage,
+      avgFPS,
+      totalInferences,
+      uptime
+    };
+  }
+  /**
+   * Clear all data
+   */
+  clear() {
+    this.samples = [];
+    this.inferenceCount = 0;
+    this.inferenceTimes = [];
+    this.queueLength = 0;
+    this.activeCount = 0;
+    this.tensorMemory = 0;
+    this.cacheMemory = 0;
+  }
+  /**
+   * Export data
+   */
+  export() {
+    return {
+      samples: this.getSamples(),
+      summary: this.getSummary(),
+      config: this.config,
+      timestamp: Date.now()
+    };
+  }
+};
+function generateDashboardHTML(monitor) {
+  const summary = monitor.getSummary();
+  const samples = monitor.getSamples();
+  const lastSample = samples[samples.length - 1];
+  const formatBytes2 = (bytes) => {
+    if (bytes < 1024)
+      return `${bytes} B`;
+    if (bytes < 1024 * 1024)
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024)
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  };
+  const formatDuration = (ms) => {
+    if (ms < 1e3)
+      return `${ms.toFixed(0)}ms`;
+    if (ms < 6e4)
+      return `${(ms / 1e3).toFixed(1)}s`;
+    return `${(ms / 6e4).toFixed(1)}m`;
+  };
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>edgeFlow.js Performance Dashboard</title>
+  <style>
+    :root {
+      --bg-primary: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #21262d;
+      --text-primary: #f0f6fc;
+      --text-secondary: #8b949e;
+      --accent: #58a6ff;
+      --success: #3fb950;
+      --warning: #d29922;
+      --error: #f85149;
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+    }
+    
+    .dashboard {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--bg-tertiary);
+    }
+    
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+    
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--bg-tertiary);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    
+    .card-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .card-value {
+      font-size: 36px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    
+    .card-value.small {
+      font-size: 24px;
+    }
+    
+    .card-unit {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-left: 4px;
+    }
+    
+    .card-change {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+    
+    .card-change.up {
+      background: rgba(63, 185, 80, 0.2);
+      color: var(--success);
+    }
+    
+    .card-change.down {
+      background: rgba(248, 81, 73, 0.2);
+      color: var(--error);
+    }
+    
+    .progress-bar {
+      height: 8px;
+      background: var(--bg-tertiary);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+    
+    .progress-fill.blue { background: var(--accent); }
+    .progress-fill.green { background: var(--success); }
+    .progress-fill.yellow { background: var(--warning); }
+    .progress-fill.red { background: var(--error); }
+    
+    .chart-container {
+      background: var(--bg-secondary);
+      border: 1px solid var(--bg-tertiary);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    
+    .chart-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    
+    .chart {
+      height: 200px;
+      position: relative;
+    }
+    
+    .chart-line {
+      stroke: var(--accent);
+      stroke-width: 2;
+      fill: none;
+    }
+    
+    .chart-area {
+      fill: url(#chartGradient);
+      opacity: 0.3;
+    }
+    
+    .chart-grid {
+      stroke: var(--bg-tertiary);
+      stroke-width: 1;
+    }
+    
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    
+    .table th,
+    .table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--bg-tertiary);
+    }
+    
+    .table th {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .table td {
+      font-variant-numeric: tabular-nums;
+    }
+    
+    footer {
+      text-align: center;
+      padding: 24px;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <header>
+      <h1>
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="8" fill="var(--accent)"/>
+          <path d="M8 16L14 10L20 16L26 10" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 22L14 16L20 22L26 16" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+        </svg>
+        edgeFlow.js Performance Dashboard
+      </h1>
+      <div class="status">
+        <div class="status-dot"></div>
+        Running for ${formatDuration(summary.uptime)}
+      </div>
+    </header>
+    
+    <div class="grid">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Total Inferences</span>
+        </div>
+        <div class="card-value">${summary.totalInferences.toLocaleString()}</div>
+      </div>
+      
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Avg Inference Time</span>
+        </div>
+        <div class="card-value">${summary.avgInferenceTime.toFixed(1)}<span class="card-unit">ms</span></div>
+      </div>
+      
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Throughput</span>
+        </div>
+        <div class="card-value">${summary.avgThroughput.toFixed(1)}<span class="card-unit">ops/s</span></div>
+      </div>
+      
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Avg FPS</span>
+        </div>
+        <div class="card-value">${Math.round(summary.avgFPS)}</div>
+      </div>
+    </div>
+    
+    <div class="grid">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Memory Usage</span>
+        </div>
+        <div class="card-value small">${formatBytes2(lastSample?.memory.usedHeap ?? 0)}</div>
+        <div class="progress-bar">
+          <div class="progress-fill ${summary.avgMemoryUsage > 0.8 ? "red" : summary.avgMemoryUsage > 0.6 ? "yellow" : "green"}" 
+               style="width: ${(summary.avgMemoryUsage * 100).toFixed(0)}%"></div>
+        </div>
+      </div>
+      
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Tensor Memory</span>
+        </div>
+        <div class="card-value small">${formatBytes2(lastSample?.memory.tensorMemory ?? 0)}</div>
+      </div>
+      
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Cache Memory</span>
+        </div>
+        <div class="card-value small">${formatBytes2(lastSample?.memory.cacheMemory ?? 0)}</div>
+      </div>
+      
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Queue Length</span>
+        </div>
+        <div class="card-value small">${lastSample?.inference.queueLength ?? 0}</div>
+      </div>
+    </div>
+    
+    <div class="chart-container">
+      <div class="chart-header">
+        <span class="chart-title">Inference Time History</span>
+      </div>
+      <div class="chart">
+        <svg width="100%" height="100%" viewBox="0 0 600 200" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.5"/>
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          ${generateChartPath(samples)}
+        </svg>
+      </div>
+    </div>
+    
+    <div class="chart-container">
+      <div class="chart-header">
+        <span class="chart-title">Recent Samples</span>
+      </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Inferences</th>
+            <th>Avg Time</th>
+            <th>Throughput</th>
+            <th>Memory</th>
+            <th>FPS</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${samples.slice(-10).reverse().map((s) => `
+            <tr>
+              <td>${new Date(s.timestamp).toLocaleTimeString()}</td>
+              <td>${s.inference.count}</td>
+              <td>${s.inference.avgTime.toFixed(2)}ms</td>
+              <td>${s.inference.throughput.toFixed(1)}/s</td>
+              <td>${formatBytes2(s.memory.usedHeap)}</td>
+              <td>${s.system.fps}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    
+    <footer>
+      Generated at ${(/* @__PURE__ */ new Date()).toLocaleString()} | edgeFlow.js Performance Monitor
+    </footer>
+  </div>
+</body>
+</html>
+  `.trim();
+}
+function generateChartPath(samples) {
+  if (samples.length < 2)
+    return "";
+  const width = 600;
+  const height = 180;
+  const padding = 10;
+  const times = samples.map((s) => s.inference.avgTime);
+  const maxTime = Math.max(...times, 1);
+  const points = samples.map((s, i) => {
+    const x = padding + i / (samples.length - 1) * (width - 2 * padding);
+    const y = height - padding - s.inference.avgTime / maxTime * (height - 2 * padding);
+    return `${x},${y}`;
+  });
+  const linePath = `M ${points.join(" L ")}`;
+  const areaPath = `M ${padding},${height - padding} L ${points.join(" L ")} L ${width - padding},${height - padding} Z`;
+  const gridLines = [];
+  for (let i = 0; i <= 4; i++) {
+    const y = padding + i / 4 * (height - 2 * padding);
+    gridLines.push(`<line class="chart-grid" x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}"/>`);
+  }
+  return `
+    ${gridLines.join("\n")}
+    <path class="chart-area" d="${areaPath}"/>
+    <path class="chart-line" d="${linePath}"/>
+  `;
+}
+function generateAsciiDashboard(monitor) {
+  const summary = monitor.getSummary();
+  const samples = monitor.getSamples();
+  const lastSample = samples[samples.length - 1];
+  const formatBytes2 = (bytes) => {
+    if (bytes < 1024)
+      return `${bytes} B`;
+    if (bytes < 1024 * 1024)
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024)
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  };
+  const bar = (value, max, width = 20) => {
+    const filled = Math.round(value / max * width);
+    return "\u2588".repeat(filled) + "\u2591".repeat(width - filled);
+  };
+  const lines = [
+    "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557",
+    "\u2551             edgeFlow.js Performance Monitor Dashboard                   \u2551",
+    "\u2560\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2563",
+    "\u2551                                                                          \u2551",
+    `\u2551  Total Inferences:  ${summary.totalInferences.toString().padStart(10)}                                      \u2551`,
+    `\u2551  Avg Inference:     ${summary.avgInferenceTime.toFixed(2).padStart(10)}ms                                     \u2551`,
+    `\u2551  Throughput:        ${summary.avgThroughput.toFixed(2).padStart(10)} ops/s                                 \u2551`,
+    `\u2551  Avg FPS:           ${Math.round(summary.avgFPS).toString().padStart(10)}                                      \u2551`,
+    "\u2551                                                                          \u2551",
+    "\u255F\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2562",
+    "\u2551 Memory Usage                                                             \u2551",
+    `\u2551  Heap:    ${bar(summary.avgMemoryUsage, 1)} ${(summary.avgMemoryUsage * 100).toFixed(0).padStart(3)}%            \u2551`,
+    `\u2551  Used:    ${formatBytes2(lastSample?.memory.usedHeap ?? 0).padStart(10)}                                          \u2551`,
+    `\u2551  Tensor:  ${formatBytes2(lastSample?.memory.tensorMemory ?? 0).padStart(10)}                                          \u2551`,
+    `\u2551  Cache:   ${formatBytes2(lastSample?.memory.cacheMemory ?? 0).padStart(10)}                                          \u2551`,
+    "\u2551                                                                          \u2551",
+    "\u255F\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2562",
+    "\u2551 Inference Time History (last 30 samples)                                 \u2551",
+    "\u2551                                                                          \u2551"
+  ];
+  const recentSamples = samples.slice(-30);
+  if (recentSamples.length > 0) {
+    const times = recentSamples.map((s) => s.inference.avgTime);
+    const maxTime = Math.max(...times, 1);
+    const chartHeight = 5;
+    for (let row = chartHeight; row > 0; row--) {
+      let line = "\u2551  ";
+      for (const time of times) {
+        const height = Math.ceil(time / maxTime * chartHeight);
+        line += height >= row ? "\u2593" : " ";
+      }
+      lines.push(line.padEnd(76) + "\u2551");
+    }
+    lines.push("\u2551  " + "\u2500".repeat(30) + "                                            \u2551");
+  }
+  lines.push("\u2551                                                                          \u2551");
+  lines.push(`\u2551  Last updated: ${(/* @__PURE__ */ new Date()).toLocaleString().padEnd(40)}             \u2551`);
+  lines.push("\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D");
+  return lines.join("\n");
+}
+var globalMonitor = null;
+function getMonitor(config) {
+  if (!globalMonitor || config) {
+    globalMonitor = new PerformanceMonitor(config);
+  }
+  return globalMonitor;
+}
+function startMonitoring(config) {
+  const monitor = getMonitor(config);
+  monitor.start();
+  return monitor;
+}
+function stopMonitoring() {
+  globalMonitor?.stop();
+}
+
 // dist/tools/index.js
 async function quantize(model, options) {
   const modelData = model instanceof ArrayBuffer ? model : await getModelData(model);
@@ -6783,7 +9045,7 @@ function quantizeFloat16(data, _options) {
   const input = new Float32Array(data);
   const output = new Uint16Array(input.length);
   for (let i = 0; i < input.length; i++) {
-    output[i] = float32ToFloat16(input[i] ?? 0);
+    output[i] = float32ToFloat162(input[i] ?? 0);
   }
   return {
     data: output.buffer,
@@ -6812,7 +9074,7 @@ function quantizeInt4(data, _options) {
     layersSkipped: 0
   };
 }
-function float32ToFloat16(value) {
+function float32ToFloat162(value) {
   const floatView = new Float32Array(1);
   const int32View = new Int32Array(floatView.buffer);
   floatView[0] = value;
@@ -6859,7 +9121,7 @@ async function prune(model, options) {
     totalParameters: total
   };
 }
-async function analyzeModel(model) {
+async function analyzeModel2(model) {
   const size = model instanceof ArrayBuffer ? model.byteLength : model.metadata.sizeBytes;
   const estimatedParams = Math.floor(size / 4);
   return {
@@ -6876,7 +9138,7 @@ async function analyzeModel(model) {
     }
   };
 }
-async function benchmark(runFn, options = {}) {
+async function benchmark2(runFn, options = {}) {
   const { warmupRuns = 3, runs = 10 } = options;
   for (let i = 0; i < warmupRuns; i++) {
     await runFn();
@@ -6903,7 +9165,7 @@ async function benchmark(runFn, options = {}) {
     times
   };
 }
-async function exportModel(model, format) {
+async function exportModel2(model, format) {
   const modelData = model instanceof ArrayBuffer ? model : await getModelData(model);
   switch (format) {
     case "json":
@@ -6967,6 +9229,7 @@ export {
   BasePipeline,
   Cache,
   EMOTION_LABELS,
+  EdgeFlowDebugger,
   EdgeFlowError,
   EdgeFlowTensor,
   ErrorCodes,
@@ -6982,6 +9245,7 @@ export {
   ModelCache,
   ModelDownloadCache,
   POPULAR_MODELS,
+  PerformanceMonitor,
   RuntimeManager,
   SENTIMENT_LABELS,
   SentimentAnalysisPipeline,
@@ -6992,14 +9256,19 @@ export {
   WebGPURuntime,
   WebNNRuntime,
   add,
-  analyzeModel,
+  analyzeModel2 as analyzeModel,
+  analyzeModel as analyzeModelDetailed,
   arange,
   argmax,
-  benchmark,
+  benchmark2 as benchmark,
+  benchmarkMemory,
+  benchmarkSuite,
   cancelPreload,
   clearModelCache,
+  compareBenchmarks,
   concat,
   configureScheduler,
+  createAsciiHistogram,
   createAudioPreprocessor,
   createBasicTokenizer,
   createCache,
@@ -7008,36 +9277,53 @@ export {
   createImagePreprocessor,
   createPipelines,
   createSentimentAnalysisPipeline,
+  createTensorHeatmap,
   createTextClassificationPipeline,
   createWASMRuntime,
   createWebGPURuntime,
   createWebNNRuntime,
   deleteCachedModel,
+  dequantizeFloat16,
+  dequantizeInt8,
+  dequantizeTensor,
+  dequantizeUint8,
+  disableDebugging,
   div,
   downloadConfig,
   downloadModel,
   downloadTokenizer,
-  exportModel,
+  enableDebugging,
+  exportModel2 as exportModel,
+  exportModel as exportModelAdvanced,
   eye,
+  float16ToFloat32,
+  formatBenchmarkResult,
+  formatComparisonResult,
+  formatTensorInspection,
   fromHub,
   fromTask,
   full,
   gc,
+  generateAsciiDashboard,
+  generateDashboardHTML,
   getAvailableRuntimes,
   getBestRuntime,
   getBestRuntimeType,
   getCachedModel,
+  getDebugger,
   getDefaultModel,
   getInfo,
   getMemoryManager,
   getMemoryStats,
   getModelCacheStats,
   getModelInfo,
+  getMonitor,
   getPipelineFactory,
   getPreloadStatus,
   getPreloadedModel,
   getRuntimeManager,
   getScheduler,
+  inspectTensor,
   isModelCached,
   isSupported,
   linspace,
@@ -7057,7 +9343,11 @@ export {
   preloadModels,
   preprocessText,
   prune,
+  pruneModel,
+  pruneTensor,
   quantize,
+  quantizeModel,
+  quantizeTensor,
   randn,
   random,
   registerAllBackends,
@@ -7066,14 +9356,18 @@ export {
   release,
   relu,
   runBatchInference,
+  benchmark as runBenchmark,
   runInference,
   setScheduler,
   sigmoid,
   softmax,
+  startMonitoring,
+  stopMonitoring,
   sub,
   sum,
   tanh,
   tensor,
+  visualizeModelArchitecture,
   withMemoryScope,
   withMemoryScopeSync,
   zeros

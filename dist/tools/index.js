@@ -275,6 +275,18 @@ export async function benchmark(runFn, options = {}) {
 // ============================================================================
 export { benchmark as runBenchmark, compareBenchmarks, benchmarkSuite, benchmarkMemory, formatBenchmarkResult, formatComparisonResult, } from './benchmark.js';
 // ============================================================================
+// Re-export advanced quantization tools
+// ============================================================================
+export { quantizeModel, quantizeTensor, dequantizeTensor, pruneModel, pruneTensor, analyzeModel as analyzeModelDetailed, exportModel as exportModelAdvanced, dequantizeInt8, dequantizeUint8, dequantizeFloat16, float16ToFloat32, } from './quantization.js';
+// ============================================================================
+// Re-export debugging tools
+// ============================================================================
+export { EdgeFlowDebugger, getDebugger, enableDebugging, disableDebugging, inspectTensor, formatTensorInspection, createAsciiHistogram, createTensorHeatmap, visualizeModelArchitecture, } from './debugger.js';
+// ============================================================================
+// Re-export monitoring tools
+// ============================================================================
+export { PerformanceMonitor, getMonitor, startMonitoring, stopMonitoring, generateDashboardHTML, generateAsciiDashboard, } from './monitor.js';
+// ============================================================================
 // Export Utilities
 // ============================================================================
 /**

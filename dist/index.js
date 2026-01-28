@@ -79,16 +79,24 @@ fromHub, fromTask, downloadModel, downloadTokenizer, downloadConfig, modelExists
 // Tools Exports
 // ============================================================================
 export { 
-// Quantization
+// Quantization (basic)
 quantize, 
-// Pruning
+// Pruning (basic)
 prune, 
-// Analysis
+// Analysis (basic)
 analyzeModel, 
-// Benchmarking
+// Benchmarking (basic)
 benchmark, 
 // Export
-exportModel, } from './tools/index.js';
+exportModel, 
+// Advanced Quantization
+quantizeModel, quantizeTensor, dequantizeTensor, pruneModel, pruneTensor, analyzeModelDetailed, exportModelAdvanced, dequantizeInt8, dequantizeUint8, dequantizeFloat16, float16ToFloat32, 
+// Debugging Tools
+EdgeFlowDebugger, getDebugger, enableDebugging, disableDebugging, inspectTensor, formatTensorInspection, createAsciiHistogram, createTensorHeatmap, visualizeModelArchitecture, 
+// Performance Monitor
+PerformanceMonitor, getMonitor, startMonitoring, stopMonitoring, generateDashboardHTML, generateAsciiDashboard, 
+// Benchmark utilities
+runBenchmark, compareBenchmarks, benchmarkSuite, benchmarkMemory, formatBenchmarkResult, formatComparisonResult, } from './tools/index.js';
 // ============================================================================
 // Convenience Functions
 // ============================================================================
