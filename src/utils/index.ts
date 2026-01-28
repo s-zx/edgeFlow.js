@@ -71,3 +71,17 @@ export {
   type ModelBundle,
   type PopularModelTask,
 } from './hub.js';
+
+// Offline/PWA Support
+export {
+  OfflineManager,
+  getOfflineManager,
+  initOffline,
+  isOffline,
+  isPWASupported,
+  generateServiceWorker,
+  generateManifest,
+  type OfflineConfig,
+  type OfflineStatus,
+  type CachedModelInfo,
+} from './offline.js';

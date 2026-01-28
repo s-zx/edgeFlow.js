@@ -11,4 +11,6 @@ export { Cache, InferenceCache, ModelDownloadCache, createCache, } from './cache
 export { loadModelData, preloadModel, preloadModels, isModelCached, getCachedModel, deleteCachedModel, clearModelCache, getModelCacheStats, getPreloadStatus, cancelPreload, getPreloadedModel, } from './model-loader.js';
 // HuggingFace Hub Integration
 export { fromHub, fromTask, downloadModel, downloadFile, downloadTokenizer, downloadConfig, modelExists, getModelInfo, getDefaultModel, POPULAR_MODELS, } from './hub.js';
+// Offline/PWA Support
+export { OfflineManager, getOfflineManager, initOffline, isOffline, isPWASupported, generateServiceWorker, generateManifest, } from './offline.js';
 //# sourceMappingURL=index.js.map
