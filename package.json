@@ -39,11 +39,14 @@
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "lint": "eslint src --ext .ts",
-    "test": "vitest",
-    "test:coverage": "vitest --coverage",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
     "demo": "npm run build && node demo/server.js",
     "demo:server": "node demo/server.js",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "npm run clean && npm run build && npm run test"
   },
   "keywords": [
     "machine-learning",
@@ -67,18 +70,18 @@
     "url": "https://github.com/s-zx/edgeflow.js/issues"
   },
   "homepage": "https://edgeflow.js.org",
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.10.0",
-    "typescript": "^5.3.0",
-    "vitest": "^1.0.0",
-    "eslint": "^8.55.0",
-    "@typescript-eslint/parser": "^6.13.0",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vitest/coverage-v8": "^1.6.0",
     "esbuild": "^0.20.0",
-    "onnxruntime-web": "^1.17.0"
+    "eslint": "^8.55.0",
+    "happy-dom": "^20.4.0",
+    "onnxruntime-web": "^1.17.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
   },
-  "peerDependencies": {},
   "engines": {
     "node": ">=18.0.0"
   },
