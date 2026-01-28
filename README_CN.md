@@ -5,7 +5,7 @@
 **轻量级、高性能的浏览器端机器学习推理框架**
 
 [![npm version](https://img.shields.io/npm/v/edgeflowjs.svg)](https://www.npmjs.com/package/edgeflowjs)
-[![bundle size](https://img.shields.io/bundlephobia/minzip/edgeflowjs)](https://bundlephobia.com/package/edgeflowjs)
+[![install size](https://packagephobia.com/badge?p=edgeflowjs)](https://packagephobia.com/result?p=edgeflowjs)
 [![license](https://img.shields.io/npm/l/edgeflowjs)](LICENSE)
 
 [文档](https://edgeflow.js.org) · [示例](examples/) · [API 参考](https://edgeflow.js.org/api) · [English](README.md) | [中文](README_CN.md)
